@@ -47,10 +47,14 @@ cargo run -- auth
 `GDRIVE_FOLDER_ID=<id> cargo run -- validate`. The folder ID is the last segment
 of the Drive folder's URL.
 
-**Secrets** — under *Settings → Secrets and variables → Actions*, set
-`GDRIVE_FOLDER_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`GOOGLE_REFRESH_TOKEN`, and `NOTES_REPO_TOKEN`. The last is a GitHub token
-that can clone private repos; skip it if every repo is public.
+**Secrets** — under *Settings → Secrets and variables → Actions*:
+
+- `GDRIVE_FOLDER_ID` — destination Drive folder
+- `GOOGLE_CLIENT_ID` — OAuth client ID from the Desktop app
+- `GOOGLE_CLIENT_SECRET` — matching client secret
+- `GOOGLE_REFRESH_TOKEN` — from `cargo run -- auth`
+- `NOTES_REPO_TOKEN` — a GitHub token that can clone private repos; skip it
+  if every repo is public
 
 **First run** — trigger the workflow by hand with *dry run* ticked. The
 rendered Markdown is uploaded as an artifact and Drive is left untouched.
