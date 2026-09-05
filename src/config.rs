@@ -11,7 +11,7 @@ use ignore::overrides::OverrideBuilder;
 use serde::Deserialize;
 
 /// Google Docs tops out around 1.02M characters. Stay under it with room for
-/// the headings and table of contents this tool adds on top of the source text.
+/// the headings this tool adds on top of the source text.
 const DEFAULT_MAX_CHARS: usize = 900_000;
 
 #[derive(Debug, thiserror::Error)]

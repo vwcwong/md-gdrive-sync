@@ -271,9 +271,9 @@ fn section_with(section: &Section, files: Vec<MarkdownFile>) -> Section {
     }
 }
 
-/// Title, generation note and Contents heading.
+/// Title and generation note.
 const DOCUMENT_OVERHEAD: usize = 400;
-/// A provenance line and a Contents entry per repository.
+/// A provenance line per repository.
 const PER_SECTION_OVERHEAD: usize = 200;
 /// Path heading, blank lines, and room for heading demotion.
 const PER_FILE_OVERHEAD: usize = 32;

@@ -31,7 +31,6 @@ pub fn render(title: &str, sections: &[Section], generated_at: &str) -> String {
 
     out.push_str(&format!("# {title}\n\n"));
     push_provenance(&mut out, sections, generated_at);
-    push_contents(&mut out, sections);
 
     let single = sections.len() == 1;
     for section in sections {
@@ -68,51 +67,6 @@ fn push_provenance(out: &mut String, sections: &[Section], generated_at: &str) {
             plural(section.files.len(), "file", "files"),
         ));
     }
-    out.push('\n');
-}
-
-/// Lists repositories and the directories within them, but not every file.
-///
-/// The Docs outline pane already navigates to individual files; a per-file table
-/// of contents would run to hundreds of lines on a real notes repository and
-/// push the actual notes below the fold.
-fn push_contents(out: &mut String, sections: &[Section]) {
-    out.push_str("## Contents\n\n");
-
-    for section in sections {
-        out.push_str(&format!("- **{}**\n", section.name));
-
-        let mut previous: Option<&str> = None;
-        let mut root_files = 0usize;
-
-        for file in &section.files {
-            match parent_dir(&file.rel_path) {
-                None => root_files += 1,
-                Some(dir) => {
-                    if previous != Some(dir) {
-                        let count = section
-                            .files
-                            .iter()
-                            .filter(|f| parent_dir(&f.rel_path) == Some(dir))
-                            .count();
-                        out.push_str(&format!(
-                            "  - `{dir}/` ({count} {})\n",
-                            plural(count, "file", "files")
-                        ));
-                        previous = Some(dir);
-                    }
-                }
-            }
-        }
-
-        if root_files > 0 {
-            out.push_str(&format!(
-                "  - {root_files} {} at the repository root\n",
-                plural(root_files, "file", "files")
-            ));
-        }
-    }
-
     out.push('\n');
 }
 
@@ -452,10 +406,6 @@ fn frontmatter_title(frontmatter: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
-
-fn parent_dir(rel_path: &str) -> Option<&str> {
-    rel_path.rfind('/').map(|i| &rel_path[..i])
-}
 
 fn short_commit(commit: &str) -> &str {
     &commit[..commit.len().min(8)]

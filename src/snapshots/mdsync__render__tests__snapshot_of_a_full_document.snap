@@ -11,15 +11,6 @@ expression: "render(\"Notes — All Repos\", &sections, \"2026-01-01 00:00 UTC\"
 - **Personal Notes** — `https://example.invalid/Personal Notes` at commit `01234567` (3 files)
 - **Work Notes** — `https://example.invalid/Work Notes` at commit `01234567` (1 file)
 
-## Contents
-
-- **Personal Notes**
-  - `docs/` (1 file)
-  - `docs/api/` (1 file)
-  - 1 file at the repository root
-- **Work Notes**
-  - 1 file at the repository root
-
 ## Personal Notes
 
 ### README.md
