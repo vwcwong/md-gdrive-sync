@@ -1,0 +1,82 @@
+# Example `repos.yml`. Copy this to `repos.yml` and replace the placeholders.
+# Unknown keys are a hard error. `mdsync validate` checks the file with no network.
+#
+# Each repo becomes one Drive document named `name` (or the last URL path segment).
+# A combined document of every repo is also written when `emit_combined` is true.
+# Existing files are updated in place, so NotebookLM sources keep working.
+#
+# Dotfiles, empty files, non-UTF-8 files, and anything matched by the repo's
+# `.gitignore` are skipped. Google Docs near 1.02M characters are split into
+# "… (Part 2)" at file boundaries.
+
+drive:
+  # Last path segment of the destination folder's Drive URL.
+  # `${IDENT}` is substituted from the environment; other braces (globs) are left alone.
+  folder_id: ${GDRIVE_FOLDER_ID}
+
+  # Title of the combined Google Doc. Ignored when `emit_combined` is false.
+  combined_doc_name: "Notes — All Repos"
+
+  # One document that concatenates every repo. At least one of this and
+  # `emit_per_repo` must be true, or the run would produce nothing.
+  emit_combined: true
+
+  # One document per repo, named after `name`.
+  emit_per_repo: true
+
+  # Trash documents this tool created in the folder that no longer match a repo
+  # (or combined doc) below. `--only` skips pruning even when this is true.
+  prune_orphans: true
+
+  # Split a document when it would exceed this many characters.
+  max_chars_per_doc: 900000
+
+# Applied to every repo. A repo-level `include` replaces this one; a repo-level
+# `exclude` is appended. Omit this block to default to `**/*.md` + `**/*.markdown`,
+# no excludes, `strip_frontmatter: true`, and the remote's default branch.
+defaults:
+  branch: null
+  include:
+    - "**/*.md"
+    - "**/*.markdown"
+  exclude:
+    - "node_modules/**"
+    - ".github/**"
+    - "**/CHANGELOG.md"
+    - "**/LICENSE.md"
+  strip_frontmatter: true
+
+repos:
+  # Public HTTPS clone. `name` is also the Drive document title; without it the
+  # last path segment of `url` is used (`notes` here). Names must be unique.
+  - url: https://github.com/owner/notes
+    name: "Personal Notes"
+
+  # Private repos authenticate with `NOTES_REPO_TOKEN` (HTTPS basic auth).
+  # SSH remotes are not supported. A trailing `.git` is stripped when deriving `name`.
+  - url: https://github.com/owner/work-notes.git
+    name: "Work Notes"
+    private: true
+    # Extra ignore on top of `defaults.exclude`. Does not replace it.
+    exclude:
+      - "drafts/**"
+
+  # Pin a branch instead of following the remote default. `include` here replaces
+  # `defaults.include` entirely, so `**/*.markdown` is no longer collected.
+  - url: https://github.com/owner/handbook
+    name: "Handbook"
+    branch: docs
+    include:
+      - "docs/**/*.md"
+    strip_frontmatter: false
+
+  # Walk only this subdirectory of the clone. Must be a relative path inside
+  # the repository (`..` and absolute paths are rejected).
+  - url: https://gitlab.com/owner/monorepo
+    name: "Product Docs"
+    subdir: packages/docs
+
+  # Local checkout for a dry run or a vault that is not a remote.
+  # `file://` cannot be `private: true`; there is nothing to authenticate to.
+  - url: file:///srv/notes
+    name: "Local Vault"
