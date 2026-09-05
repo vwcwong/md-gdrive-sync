@@ -1,0 +1,56 @@
+---
+source: src/render.rs
+expression: "render(\"Notes — All Repos\", &sections, \"2026-01-01 00:00 UTC\")"
+---
+# Notes — All Repos
+
+*Generated 2026-01-01 00:00 UTC by mdsync. Do not edit: this document is overwritten on every sync.*
+
+**Sources**
+
+- **Personal Notes** — `https://example.invalid/Personal Notes` at commit `01234567` (3 files)
+- **Work Notes** — `https://example.invalid/Work Notes` at commit `01234567` (1 file)
+
+## Contents
+
+- **Personal Notes**
+  - `docs/` (1 file)
+  - `docs/api/` (1 file)
+  - 1 file at the repository root
+- **Work Notes**
+  - 1 file at the repository root
+
+## Personal Notes
+
+### README.md
+
+#### Overview
+
+Top level notes.
+
+### docs/setup.md
+
+#### Getting Started
+
+#### Steps
+
+```sh
+# not a heading
+make
+```
+
+### docs/api/auth.md
+
+#### Auth
+
+##### Tokens
+
+*[image: diagram]*
+
+## Work Notes
+
+### standup.md
+
+#### Monday
+
+notes
