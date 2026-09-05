@@ -40,11 +40,8 @@ pub struct DriveClient {
 impl DriveClient {
     pub fn new(access_token: String) -> Result<Self> {
         Ok(Self {
-            http: reqwest::blocking::Client::builder()
-                // Uploads of a large notes repository can take a while.
-                .timeout(Duration::from_secs(300))
-                .build()
-                .context("building the HTTP client")?,
+            // Uploads of a large notes repository can take a while.
+            http: super::http_client(Duration::from_secs(300))?,
             access_token,
         })
     }
@@ -113,15 +110,10 @@ impl DriveClient {
                 params.push(("pageToken", token.clone()));
             }
 
-            let response = self
-                .http
-                .get(FILES_URL)
-                .bearer_auth(&self.access_token)
-                .query(&params)
-                .send()
-                .context("listing Drive files")?;
-
-            let page: FileList = self.parse(response, "listing Drive files")?;
+            let page: FileList = self.send(
+                self.http.get(FILES_URL).query(&params),
+                "listing Drive files",
+            )?;
             files.extend(page.files);
 
             page_token = page.next_page_token;
@@ -140,56 +132,47 @@ impl DriveClient {
             "parents": [folder_id],
         });
 
-        let response = self
-            .http
-            .post(UPLOAD_URL)
-            .bearer_auth(&self.access_token)
-            .query(&[
-                ("uploadType", "multipart"),
-                ("supportsAllDrives", "true"),
-                ("fields", "id, name"),
-            ])
-            .header(
-                reqwest::header::CONTENT_TYPE,
-                format!("multipart/related; boundary={BOUNDARY}"),
-            )
-            .body(multipart_related(&metadata.to_string(), markdown))
-            .send()
-            .context("creating the Drive document")?;
-
-        self.parse(response, "creating the Drive document")
+        self.send(
+            self.http
+                .post(UPLOAD_URL)
+                .query(&[
+                    ("uploadType", "multipart"),
+                    ("supportsAllDrives", "true"),
+                    ("fields", "id, name"),
+                ])
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    format!("multipart/related; boundary={BOUNDARY}"),
+                )
+                .body(multipart_related(&metadata.to_string(), markdown)),
+            "creating the Drive document",
+        )
     }
 
     /// Replaces the content of an existing Doc, keeping its ID.
     fn update_doc(&self, file_id: &str, markdown: &str) -> Result<DriveFile> {
-        let response = self
-            .http
-            .patch(format!("{UPLOAD_URL}/{file_id}"))
-            .bearer_auth(&self.access_token)
-            .query(&[
-                ("uploadType", "media"),
-                ("supportsAllDrives", "true"),
-                ("fields", "id, name"),
-            ])
-            .header(reqwest::header::CONTENT_TYPE, MARKDOWN)
-            .body(markdown.to_string())
-            .send()
-            .context("updating the Drive document")?;
-
-        self.parse(response, "updating the Drive document")
+        self.send(
+            self.http
+                .patch(format!("{UPLOAD_URL}/{file_id}"))
+                .query(&[
+                    ("uploadType", "media"),
+                    ("supportsAllDrives", "true"),
+                    ("fields", "id, name"),
+                ])
+                .header(reqwest::header::CONTENT_TYPE, MARKDOWN)
+                .body(markdown.to_string()),
+            "updating the Drive document",
+        )
     }
 
     pub fn trash(&self, file_id: &str) -> Result<()> {
-        let response = self
-            .http
-            .patch(format!("{FILES_URL}/{file_id}"))
-            .bearer_auth(&self.access_token)
-            .query(&[("supportsAllDrives", "true"), ("fields", "id, name")])
-            .json(&serde_json::json!({ "trashed": true }))
-            .send()
-            .context("trashing a Drive document")?;
-
-        let _: DriveFile = self.parse(response, "trashing a Drive document")?;
+        let _: DriveFile = self.send(
+            self.http
+                .patch(format!("{FILES_URL}/{file_id}"))
+                .query(&[("supportsAllDrives", "true"), ("fields", "id, name")])
+                .json(&serde_json::json!({ "trashed": true })),
+            "trashing a Drive document",
+        )?;
         Ok(())
     }
 
@@ -209,6 +192,18 @@ impl DriveClient {
 
         serde_json::from_str(&body)
             .with_context(|| format!("{doing}: unexpected response shape: {body}"))
+    }
+
+    fn send<T: serde::de::DeserializeOwned>(
+        &self,
+        request: reqwest::blocking::RequestBuilder,
+        doing: &str,
+    ) -> Result<T> {
+        let response = request
+            .bearer_auth(&self.access_token)
+            .send()
+            .with_context(|| doing.to_string())?;
+        self.parse(response, doing)
     }
 }
 

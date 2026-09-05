@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
-use crate::clone::Cloner;
+use crate::clone::{Cloner, mask_in_actions};
 use crate::collect;
 use crate::collect::MarkdownFile;
 use crate::config::Config;
@@ -15,7 +15,7 @@ use crate::drive::files::{DriveClient, Upsert};
 use crate::render::{self, Section};
 
 /// Environment variable holding the PAT used for repositories marked private.
-pub const TOKEN_VAR: &str = "NOTES_REPO_TOKEN";
+pub use crate::clone::TOKEN_VAR;
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -41,7 +41,7 @@ pub fn build(config: &Config, options: &Options) -> Result<Vec<Document>> {
 
     let token = std::env::var(TOKEN_VAR).ok();
     if let Some(token) = &token {
-        crate::clone::mask_in_actions(token);
+        mask_in_actions(token);
     }
     let cloner = Cloner::new(token);
 
@@ -110,10 +110,10 @@ pub fn publish(config: &Config, documents: &[Document], options: &Options) -> Re
     )?;
 
     let refresh_token = auth::required_env(auth::REFRESH_TOKEN_VAR)?;
-    crate::clone::mask_in_actions(&refresh_token);
+    mask_in_actions(&refresh_token);
 
     let access_token = oauth.access_token(&refresh_token)?;
-    crate::clone::mask_in_actions(&access_token);
+    mask_in_actions(&access_token);
     let drive = DriveClient::new(access_token)?;
 
     for document in documents {

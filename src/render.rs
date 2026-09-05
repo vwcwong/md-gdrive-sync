@@ -150,11 +150,8 @@ fn push_section(out: &mut String, section: &Section, base: usize) {
 }
 
 fn push_heading(out: &mut String, level: usize, text: &str) {
-    let level = level.min(MAX_HEADING);
-    out.push_str(&"#".repeat(level));
-    out.push(' ');
-    out.push_str(text);
-    out.push_str("\n\n");
+    push_heading_line(out, level, text);
+    out.push('\n');
 }
 
 // ---------------------------------------------------------------------------

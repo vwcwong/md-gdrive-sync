@@ -34,10 +34,7 @@ impl OauthClient {
         Ok(Self {
             client_id,
             client_secret,
-            http: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(60))
-                .build()
-                .context("building the HTTP client")?,
+            http: super::http_client(Duration::from_secs(60))?,
         })
     }
 
@@ -51,19 +48,15 @@ impl OauthClient {
     /// Exchanges a refresh token for a short-lived access token. This is the
     /// only auth step a scheduled run performs.
     pub fn access_token(&self, refresh_token: &str) -> Result<String> {
-        let response = self
-            .http
-            .post(TOKEN_ENDPOINT)
-            .form(&[
+        let token = self.exchange(
+            &[
                 ("client_id", self.client_id.as_str()),
                 ("client_secret", self.client_secret.as_str()),
                 ("refresh_token", refresh_token),
                 ("grant_type", "refresh_token"),
-            ])
-            .send()
-            .context("requesting an access token")?;
-
-        let token: TokenResponse = parse_token_response(response)?;
+            ],
+            "requesting an access token",
+        )?;
         Ok(token.access_token)
     }
 
@@ -83,20 +76,16 @@ impl OauthClient {
         let code = wait_for_code(&listener)?;
         debug!("received an authorization code");
 
-        let response = self
-            .http
-            .post(TOKEN_ENDPOINT)
-            .form(&[
+        let token = self.exchange(
+            &[
                 ("client_id", self.client_id.as_str()),
                 ("client_secret", self.client_secret.as_str()),
                 ("code", code.as_str()),
                 ("redirect_uri", redirect_uri.as_str()),
                 ("grant_type", "authorization_code"),
-            ])
-            .send()
-            .context("exchanging the authorization code")?;
-
-        let token: TokenResponse = parse_token_response(response)?;
+            ],
+            "exchanging the authorization code",
+        )?;
         token.refresh_token.context(
             "Google did not return a refresh token. This happens when the account has already \
              granted this client; revoke the app's access in the Google Account security \
@@ -121,6 +110,16 @@ impl OauthClient {
         )
         .context("building the consent URL")?;
         Ok(url.to_string())
+    }
+
+    fn exchange(&self, form: &[(&str, &str)], doing: &str) -> Result<TokenResponse> {
+        let response = self
+            .http
+            .post(TOKEN_ENDPOINT)
+            .form(form)
+            .send()
+            .with_context(|| doing.to_string())?;
+        parse_token_response(response)
     }
 }
 
@@ -204,10 +203,10 @@ fn extract_code(query: &str) -> Result<String> {
     let mut code = None;
     let mut error = None;
 
-    for pair in query.split('&') {
-        match pair.split_once('=') {
-            Some(("code", value)) => code = Some(percent_decode(value)),
-            Some(("error", value)) => error = Some(percent_decode(value)),
+    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        match key.as_ref() {
+            "code" => code = Some(value.into_owned()),
+            "error" => error = Some(value.into_owned()),
             _ => {}
         }
     }
@@ -216,37 +215,6 @@ fn extract_code(query: &str) -> Result<String> {
         bail!("Google returned an error instead of a code: {error}");
     }
     code.context("the redirect carried no authorization code")
-}
-
-fn percent_decode(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&input[i + 1..i + 3], 16) {
-                Ok(byte) => {
-                    out.push(byte);
-                    i += 3;
-                }
-                Err(_) => {
-                    out.push(bytes[i]);
-                    i += 1;
-                }
-            },
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            byte => {
-                out.push(byte);
-                i += 1;
-            }
-        }
-    }
-
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn respond(stream: &mut std::net::TcpStream, message: &str) -> Result<()> {
@@ -281,6 +249,7 @@ mod tests {
     fn extracts_the_code_from_a_callback_query() {
         let code = extract_code("code=4%2F0AY0e&scope=https%3A%2F%2Fexample").unwrap();
         assert_eq!(code, "4/0AY0e");
+        assert_eq!(extract_code("code=a%2Fb+c").unwrap(), "a/b c");
     }
 
     #[test]
@@ -292,14 +261,6 @@ mod tests {
     #[test]
     fn errors_when_the_query_has_no_code() {
         assert!(extract_code("state=xyz").is_err());
-    }
-
-    #[test]
-    fn decodes_percent_and_plus_escapes() {
-        assert_eq!(percent_decode("a%2Fb+c"), "a/b c");
-        assert_eq!(percent_decode("plain"), "plain");
-        // A stray % is passed through rather than panicking.
-        assert_eq!(percent_decode("100%"), "100%");
     }
 
     #[test]

@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use ignore::overrides::OverrideBuilder;
 use serde::Deserialize;
 
 /// Google Docs tops out around 1.02M characters. Stay under it with room for
@@ -272,9 +273,11 @@ impl Repo {
         }
 
         // Compile the globs now so a bad pattern fails at `validate` time rather
-        // than midway through a scheduled run.
+        // than midway through a scheduled run. Same engine `collect` uses, so a
+        // pattern that passes here cannot fail later with a different glob dialect.
+        let mut globs = OverrideBuilder::new(".");
         for pattern in self.include.iter().chain(self.exclude.iter()) {
-            globset::Glob::new(pattern).map_err(|e| {
+            globs.add(pattern).map_err(|e| {
                 ConfigError::Invalid(format!("{}: invalid glob {:?}: {e}", self.name, pattern))
             })?;
         }

@@ -13,6 +13,9 @@ use tracing::{debug, info};
 
 use crate::config::Repo;
 
+/// Environment variable holding the PAT used for repositories marked private.
+pub const TOKEN_VAR: &str = "NOTES_REPO_TOKEN";
+
 /// A cloned repository. Deleting this deletes the working tree.
 #[derive(Debug)]
 pub struct Checkout {
@@ -43,7 +46,7 @@ impl Cloner {
     pub fn checkout(&self, repo: &Repo) -> Result<Checkout> {
         if repo.private && self.token.is_none() {
             bail!(
-                "{} is marked private but no token was supplied; set NOTES_REPO_TOKEN",
+                "{} is marked private but no token was supplied; set {TOKEN_VAR}",
                 repo.name
             );
         }
@@ -111,7 +114,7 @@ impl Cloner {
         // and out of the clone's .git/config.
         let _askpass = if self.use_token_for(repo) {
             let token = self.token.as_deref().expect("checked by use_token_for");
-            let helper = Askpass::new(token)?;
+            let helper = Askpass::new()?;
             command.env("GIT_ASKPASS", helper.path());
             command.env(ASKPASS_TOKEN_VAR, token);
             Some(helper)
@@ -181,7 +184,7 @@ struct Askpass {
 }
 
 impl Askpass {
-    fn new(_token: &str) -> Result<Self> {
+    fn new() -> Result<Self> {
         let dir = tempfile::Builder::new()
             .prefix("mdsync-askpass-")
             .tempdir()

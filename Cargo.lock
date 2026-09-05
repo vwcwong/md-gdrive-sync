@@ -1009,7 +1009,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "globset",
  "ignore",
  "insta",
  "jiff",
@@ -1021,6 +1020,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
