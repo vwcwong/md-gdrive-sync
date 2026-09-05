@@ -163,7 +163,7 @@ fn run_sync(args: &SyncArgs) -> Result<()> {
         return Ok(());
     }
 
-    sync::publish(&config, &documents)
+    sync::publish(&config, &documents, &options)
 }
 
 fn mint_token(args: &AuthArgs) -> Result<()> {
