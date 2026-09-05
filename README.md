@@ -1,16 +1,16 @@
 # md-gdrive-sync
 
-Clones a list of git repos, collects their Markdown, and publishes it to a Google
-Drive folder as Google Docs — one per repo plus a combined doc — for use as
-NotebookLM sources.
+If your notes live in Git, one convenient way to use them in NotebookLM is as
+Google Docs in Drive. This publishes Markdown from a list of repos into a
+folder there — one document per repo, plus a combined document of everything.
 
-Re-running updates the existing docs rather than replacing them, so NotebookLM
-sources you have already added keep working.
+Each run updates the existing files rather than creating new ones, so sources
+you have already attached keep working.
 
 ## Output
 
-Each file becomes a section headed by its full path, with the file's own
-headings nested underneath:
+Each file becomes a section titled with its full path. Headings inside the
+file nest underneath:
 
 ```
 ## docs/api/auth.md
@@ -18,9 +18,9 @@ headings nested underneath:
 #### Tokens
 ```
 
-Frontmatter is stripped, with a `title:` used as the heading. Code blocks are
-left alone. Images become a text placeholder. Anything covered by `.gitignore`,
-and dotfiles, are skipped.
+Frontmatter is stripped; a `title:` field is used as the heading instead.
+Code blocks are unchanged. Images become a text placeholder. Dotfiles and
+anything matched by `.gitignore` are skipped.
 
 ## Setup
 
@@ -31,10 +31,10 @@ cargo test
 
 **Google Cloud** — create a project, enable the Drive API, then:
 
-1. Publish the OAuth consent screen. Left in *Testing*, the refresh token
-   expires every 7 days.
-2. Create an OAuth client ID of type **Desktop app**. A service account will
-   not work.
+1. Publish the OAuth consent screen. If you leave it in *Testing*, the
+   refresh token expires every 7 days.
+2. Create an OAuth client ID of type **Desktop app**. Do not use a service
+   account.
 
 **Refresh token**
 
@@ -47,14 +47,14 @@ cargo run -- auth
 `GDRIVE_FOLDER_ID=<id> cargo run -- validate`. The folder ID is the last segment
 of the Drive folder's URL.
 
-**Secrets** — set `GDRIVE_FOLDER_ID`, `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, and `NOTES_REPO_TOKEN` (a
-GitHub token that can clone private repos; omit if all repos are public)
-under *Settings → Secrets and variables → Actions*.
+**Secrets** — under *Settings → Secrets and variables → Actions*, set
+`GDRIVE_FOLDER_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_REFRESH_TOKEN`, and `NOTES_REPO_TOKEN`. The last is a GitHub token
+that can clone private repos; skip it if every repo is public.
 
-**First run** — trigger the workflow manually with *dry run* ticked. Everything
-is rendered and left as a downloadable artifact without touching Drive. Then run
-it for real and leave the daily schedule to it.
+**First run** — trigger the workflow by hand with *dry run* ticked. The
+rendered Markdown is uploaded as an artifact and Drive is left untouched.
+When that looks right, run it for real and let the daily schedule take over.
 
 ## Commands
 
@@ -63,17 +63,18 @@ cargo run -- validate                       # check repos.yml, no network
 cargo run -- sync --dry-run                 # render to ./out, skip Drive
 cargo run -- sync                           # render and publish
 cargo run -- sync --only "Personal Notes"   # one repo (skips pruning)
-cargo run -- auth                           # mint a refresh token
+cargo run -- auth                           # get a refresh token
 ```
 
-Every run leaves its rendered Markdown in `./out`, published or not.
+Rendered Markdown is always written to `./out`, even when Drive is skipped.
 
 ## Notes
 
-- A repo-level `include` **replaces** `defaults.include`; a repo-level `exclude`
-  is **added to** `defaults.exclude`.
-- `prune_orphans` trashes docs that no longer match a configured repo. Skipped
-  under `--only`.
-- The refresh token does not need rotating. Re-run `cargo run -- auth` if it is
-  ever revoked.
-- A repo collecting 0 files usually means its globs or `.gitignore`.
+- A repo-level `include` replaces `defaults.include`. A repo-level `exclude`
+  is added to `defaults.exclude`.
+- `prune_orphans` moves Drive docs that no longer match a configured repo to
+  the trash. It is skipped under `--only`.
+- The refresh token does not need rotating. Re-run `cargo run -- auth` if it
+  is ever revoked.
+- If a repo collects no files, check its globs and `.gitignore`.
+
