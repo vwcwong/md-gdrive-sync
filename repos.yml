@@ -28,12 +28,5 @@ defaults:
   strip_frontmatter: true
 
 repos:
-  - url: https://github.com/vwcwong/notes
-    name: "Personal Notes" # also the Drive document name
-    private: true
-
-  - url: https://github.com/vwcwong/work-notes
-    name: "Work Notes"
-    private: true
-    exclude:
-      - "drafts/**"
+  - url: https://github.com/vwcwong/COMP9315
+    name: "COMP9315 - Database Systems Implementation" # also the Drive document name
