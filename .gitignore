@@ -1,0 +1,5 @@
+/target
+/out
+.direnv/
+*.secret
+.env
