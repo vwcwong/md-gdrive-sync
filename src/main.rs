@@ -163,7 +163,7 @@ fn run_sync(args: &SyncArgs) -> Result<()> {
         return Ok(());
     }
 
-    anyhow::bail!("publishing to Google Drive is not implemented yet; re-run with --dry-run")
+    sync::publish(&config, &documents)
 }
 
 fn mint_token(args: &AuthArgs) -> Result<()> {

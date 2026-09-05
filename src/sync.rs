@@ -9,6 +9,8 @@ use tracing::{info, warn};
 use crate::clone::Cloner;
 use crate::collect;
 use crate::config::Config;
+use crate::drive::auth::{self, OauthClient};
+use crate::drive::files::{DriveClient, Upsert};
 use crate::render::{self, Section};
 
 /// Environment variable holding the PAT used for repositories marked private.
@@ -93,6 +95,40 @@ pub fn build(config: &Config, options: &Options) -> Result<Vec<Document>> {
     }
 
     Ok(documents)
+}
+
+/// Publishes each document to the configured Drive folder.
+///
+/// Existing documents are updated in place rather than replaced, so their Drive
+/// IDs survive and NotebookLM sources stay linked across runs.
+pub fn publish(config: &Config, documents: &[Document]) -> Result<()> {
+    let oauth = OauthClient::from_env().context(
+        "Google credentials are missing; run `mdsync auth` and set GOOGLE_CLIENT_ID, \
+         GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN",
+    )?;
+
+    let refresh_token = auth::required_env(auth::REFRESH_TOKEN_VAR)?;
+    crate::clone::mask_in_actions(&refresh_token);
+
+    let access_token = oauth.access_token(&refresh_token)?;
+    crate::clone::mask_in_actions(&access_token);
+    let drive = DriveClient::new(access_token)?;
+
+    for document in documents {
+        let outcome = drive
+            .upsert_doc(&config.drive.folder_id, &document.name, &document.markdown)
+            .with_context(|| format!("publishing {:?}", document.name))?;
+
+        match outcome {
+            Upsert::Created => println!(
+                "created {:?} — add it to NotebookLM once; later runs update it in place",
+                document.name
+            ),
+            Upsert::Updated => println!("updated {:?}", document.name),
+        }
+    }
+
+    Ok(())
 }
 
 /// Writes each document to `dir` as Markdown, returning the paths written.
