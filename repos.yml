@@ -1,0 +1,39 @@
+# Which repositories to pull Markdown from, and where the result lands.
+# `mdsync validate` checks this file without touching the network.
+
+drive:
+  # Trailing path segment of the destination folder's Drive URL.
+  folder_id: ${GDRIVE_FOLDER_ID}
+  combined_doc_name: "Notes — All Repos"
+  emit_combined: true
+  emit_per_repo: true
+  # Trash documents this tool created that no longer match a repo below.
+  prune_orphans: true
+  # Google Docs caps out near 1.02M characters; longer documents are split
+  # into "… (Part 2)" at file boundaries.
+  max_chars_per_doc: 900000
+
+# Applied to every repo. `include` is replaced by a repo-level `include`;
+# `exclude` is added to by a repo-level `exclude`.
+defaults:
+  branch: null # null follows the remote's default branch
+  include:
+    - "**/*.md"
+    - "**/*.markdown"
+  exclude:
+    - "node_modules/**"
+    - ".github/**"
+    - "**/CHANGELOG.md"
+    - "**/LICENSE.md"
+  strip_frontmatter: true
+
+repos:
+  - url: https://github.com/vwcwong/notes
+    name: "Personal Notes" # also the Drive document name
+    private: true
+
+  - url: https://github.com/vwcwong/work-notes
+    name: "Work Notes"
+    private: true
+    exclude:
+      - "drafts/**"

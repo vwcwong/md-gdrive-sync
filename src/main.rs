@@ -1,7 +1,9 @@
 use std::path::PathBuf;
+use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use mdsync::config::Config;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -71,15 +73,47 @@ struct AuthArgs {
     port: u16,
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    match cli.command {
-        Command::Validate(_) => anyhow::bail!("`validate` is not implemented yet"),
+    // Printed rather than returned from main: a config typo should read as one
+    // line of explanation, not a backtrace (RUST_BACKTRACE is on in the dev shell).
+    if let Err(err) = run(cli.command) {
+        eprintln!("error: {err:#}");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+fn run(command: Command) -> Result<()> {
+    match command {
+        Command::Validate(args) => validate(&args),
         Command::Sync(_) => anyhow::bail!("`sync` is not implemented yet"),
         Command::Auth(_) => anyhow::bail!("`auth` is not implemented yet"),
     }
+}
+
+fn validate(args: &ConfigArgs) -> Result<()> {
+    let config = Config::load(&args.config)
+        .with_context(|| format!("validating {}", args.config.display()))?;
+
+    println!("{} is valid.", args.config.display());
+    println!(
+        "  {} repositories -> Drive folder {}",
+        config.repos.len(),
+        config.drive.folder_id
+    );
+    for repo in &config.repos {
+        println!(
+            "  - {:<24} {}{}",
+            repo.name,
+            repo.url,
+            if repo.private { " (private)" } else { "" }
+        );
+    }
+
+    Ok(())
 }
 
 /// `-v` and `-vv` raise the default level; RUST_LOG always wins if set, so CI
