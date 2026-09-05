@@ -19,8 +19,8 @@ headings nested underneath:
 ```
 
 Frontmatter is stripped, with a `title:` used as the heading. Code blocks are
-left alone. Images become a text placeholder, since Google Docs cannot render
-the originals. Anything covered by `.gitignore`, and dotfiles, are skipped.
+left alone. Images become a text placeholder. Anything covered by `.gitignore`,
+and dotfiles, are skipped.
 
 ## Setup
 
@@ -31,15 +31,10 @@ cargo test
 
 **Google Cloud** — create a project, enable the Drive API, then:
 
-1. OAuth consent screen: *External*, scope
-   `https://www.googleapis.com/auth/drive.file`, publishing status
-   **"In production"** — left in *Testing*, the refresh token expires every 7
-   days. This scope needs no verification review.
-2. Create an OAuth client ID of type **Desktop app**.
-
-> Not a service account — Google's docs state they ["don't have storage quota
-> and can't own any files"](https://developers.google.com/workspace/drive/api/guides/handle-errors),
-> so one cannot write to a personal Drive folder even when it is shared with it.
+1. Publish the OAuth consent screen. Left in *Testing*, the refresh token
+   expires every 7 days.
+2. Create an OAuth client ID of type **Desktop app**. A service account will
+   not work.
 
 **Refresh token**
 
@@ -54,7 +49,7 @@ of the Drive folder's URL.
 
 **Secrets** — set `GDRIVE_FOLDER_ID`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, and `NOTES_REPO_TOKEN` (a
-fine-grained PAT with read-only Contents access; omit if all repos are public)
+GitHub token that can clone private repos; omit if all repos are public)
 under *Settings → Secrets and variables → Actions*.
 
 **First run** — trigger the workflow manually with *dry run* ticked. Everything
@@ -78,9 +73,7 @@ Every run leaves its rendered Markdown in `./out`, published or not.
 - A repo-level `include` **replaces** `defaults.include`; a repo-level `exclude`
   is **added to** `defaults.exclude`.
 - `prune_orphans` trashes docs that no longer match a configured repo. Skipped
-  under `--only`, which syncs too little of the folder to judge what is orphaned.
+  under `--only`.
 - The refresh token does not need rotating. Re-run `cargo run -- auth` if it is
   ever revoked.
-- `storageQuotaExceeded` means the credentials are a service account.
-  `invalid_client` means the client ID/secret do not match. A repo collecting 0
-  files usually means its globs or `.gitignore`.
+- A repo collecting 0 files usually means its globs or `.gitignore`.
