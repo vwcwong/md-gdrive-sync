@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mdsync::config::Config;
+use mdsync::drive::auth::{self, OauthClient};
 use mdsync::sync;
 use tracing_subscriber::EnvFilter;
 
@@ -91,7 +92,7 @@ fn run(command: Command) -> Result<()> {
     match command {
         Command::Validate(args) => validate(&args),
         Command::Sync(args) => run_sync(&args),
-        Command::Auth(_) => anyhow::bail!("`auth` is not implemented yet"),
+        Command::Auth(args) => mint_token(&args),
     }
 }
 
@@ -163,4 +164,20 @@ fn run_sync(args: &SyncArgs) -> Result<()> {
     }
 
     anyhow::bail!("publishing to Google Drive is not implemented yet; re-run with --dry-run")
+}
+
+fn mint_token(args: &AuthArgs) -> Result<()> {
+    let client = OauthClient::new(args.client_id.clone(), args.client_secret.clone())?;
+    let refresh_token = client.mint_refresh_token(args.port)?;
+
+    println!(
+        "\nRefresh token minted. Store it as the {} repository secret:\n",
+        auth::REFRESH_TOKEN_VAR
+    );
+    println!("{refresh_token}\n");
+    println!(
+        "It does not expire on a schedule, but it will stop working if the app's consent \n\
+         screen is left in Testing status, so set it to In production."
+    );
+    Ok(())
 }
