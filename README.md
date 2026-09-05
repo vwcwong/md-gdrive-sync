@@ -68,13 +68,3 @@ cargo run -- auth                           # get a refresh token
 
 Rendered Markdown is always written to `./out`, even when Drive is skipped.
 
-## Notes
-
-- A repo-level `include` replaces `defaults.include`. A repo-level `exclude`
-  is added to `defaults.exclude`.
-- `prune_orphans` moves Drive docs that no longer match a configured repo to
-  the trash. It is skipped under `--only`.
-- The refresh token does not need rotating. Re-run `cargo run -- auth` if it
-  is ever revoked.
-- If a repo collects no files, check its globs and `.gitignore`.
-
