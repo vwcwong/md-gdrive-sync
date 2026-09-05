@@ -7,3 +7,4 @@ pub mod collect;
 pub mod config;
 pub mod drive;
 pub mod render;
+pub mod sync;

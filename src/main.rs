@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use mdsync::config::Config;
+use mdsync::sync;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -89,7 +90,7 @@ fn main() -> ExitCode {
 fn run(command: Command) -> Result<()> {
     match command {
         Command::Validate(args) => validate(&args),
-        Command::Sync(_) => anyhow::bail!("`sync` is not implemented yet"),
+        Command::Sync(args) => run_sync(&args),
         Command::Auth(_) => anyhow::bail!("`auth` is not implemented yet"),
     }
 }
@@ -132,4 +133,34 @@ fn init_tracing(verbose: u8) {
         .with_target(false)
         .without_time()
         .init();
+}
+
+fn run_sync(args: &SyncArgs) -> Result<()> {
+    let config = Config::load(&args.config.config)
+        .with_context(|| format!("loading {}", args.config.config.display()))?;
+
+    let options = sync::Options {
+        dry_run: args.dry_run,
+        out: args.out.clone(),
+        only: args.only.clone(),
+    };
+
+    let documents = sync::build(&config, &options)?;
+
+    // Written on every run, not just dry ones: a scheduled run then leaves an
+    // artifact that can be inspected without Drive access.
+    let written = sync::write_local(&documents, &options.out)?;
+    for path in &written {
+        println!("wrote {}", path.display());
+    }
+
+    if options.dry_run {
+        println!(
+            "dry run: {} document(s), nothing published",
+            documents.len()
+        );
+        return Ok(());
+    }
+
+    anyhow::bail!("publishing to Google Drive is not implemented yet; re-run with --dry-run")
 }

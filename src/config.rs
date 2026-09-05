@@ -236,12 +236,24 @@ impl Config {
 
 impl Repo {
     fn validate(&self) -> Result<()> {
-        // The PAT is injected as HTTP basic auth, which only works over https.
-        // An ssh remote would need a deploy key on the runner instead.
-        if !self.url.starts_with("https://") && !self.url.starts_with("http://") {
+        // The PAT is injected as HTTP basic auth, which only works over http(s).
+        // An ssh remote would need a deploy key on the runner instead. file://
+        // is allowed so a local clone or vault can be synced and so the pipeline
+        // can be exercised end to end without network access.
+        let scheme_ok = ["https://", "http://", "file://"]
+            .iter()
+            .any(|s| self.url.starts_with(s));
+        if !scheme_ok {
             return Err(ConfigError::Invalid(format!(
-                "{}: url must be http(s); ssh remotes are not supported because private \
-                 repositories authenticate with a token, not a key",
+                "{}: url must be http(s) or file://; ssh remotes are not supported because \
+                 private repositories authenticate with a token, not a key",
+                self.name
+            )));
+        }
+
+        if self.private && self.url.starts_with("file://") {
+            return Err(ConfigError::Invalid(format!(
+                "{}: a file:// repository cannot be private; there is nothing to authenticate to",
                 self.name
             )));
         }
@@ -484,7 +496,28 @@ repos:
   - url: git@github.com:owner/notes.git
 "#;
         let err = parse(yaml).unwrap_err().to_string();
-        assert!(err.contains("must be http(s)"), "{err}");
+        assert!(err.contains("must be http(s) or file://"), "{err}");
+    }
+
+    #[test]
+    fn allows_local_file_urls_but_not_private_ones() {
+        let yaml = r#"
+drive:
+  folder_id: "abc123"
+repos:
+  - url: file:///srv/notes
+"#;
+        assert_eq!(parse(yaml).unwrap().repos[0].name, "notes");
+
+        let private = r#"
+drive:
+  folder_id: "abc123"
+repos:
+  - url: file:///srv/notes
+    private: true
+"#;
+        let err = parse(private).unwrap_err().to_string();
+        assert!(err.contains("cannot be private"), "{err}");
     }
 
     #[test]
