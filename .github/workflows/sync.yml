@@ -1,0 +1,84 @@
+name: sync
+
+on:
+  schedule:
+    # Daily. Offset from the hour because scheduled runs bunch up on the hour
+    # and get delayed.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Render documents but do not publish to Drive"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    # Only a config change needs to sync promptly; code changes wait for the
+    # schedule or a manual run.
+    paths: ["repos.yml"]
+
+# Nothing is written back to this repository: Drive document IDs are recovered
+# by name each run, so there is no state file to commit.
+permissions:
+  contents: read
+
+# Two runs must not race the same Drive documents. Queue rather than cancel, so
+# a scheduled run is not dropped by a manual one.
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      # No Nix binary cache: the free Magic Nix Cache reached end of life in
+      # February 2025 and its replacement is a paid service. The toolchain comes
+      # prebuilt from cache.nixos.org; the cargo build is the real cost here.
+      - uses: Swatinem/rust-cache@v2
+
+      - run: nix develop --command cargo fmt --check
+      - run: nix develop --command cargo clippy --all-targets
+      - run: nix develop --command cargo test
+
+  sync:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: nix develop --command cargo build --release
+
+      - name: Sync notes to Drive
+        env:
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          # Fine-grained PAT with read-only contents access to the notes repos.
+          NOTES_REPO_TOKEN: ${{ secrets.NOTES_REPO_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(sync --config repos.yml --out out)
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          ./target/release/mdsync "${args[@]}"
+
+      # Uploaded even when the run failed: the rendered Markdown is written
+      # before anything is published, so a bad document can be diffed without
+      # Drive access.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rendered-markdown
+          path: out/
+          if-no-files-found: warn
