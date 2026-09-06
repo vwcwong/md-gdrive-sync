@@ -4,7 +4,6 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
-use ignore::overrides::OverrideBuilder;
 use tracing::{debug, warn};
 
 use crate::config::Repo;
@@ -24,22 +23,8 @@ pub struct MarkdownFile {
 /// skipped: a note not worth committing is not worth syncing, and `.obsidian/`
 /// is editor state rather than notes.
 pub fn collect(root: &Path, repo: &Repo) -> Result<Vec<MarkdownFile>> {
-    let mut overrides = OverrideBuilder::new(root);
-
-    // In this crate a plain glob whitelists and a leading `!` ignores, which is
-    // the inverse of gitignore. Excludes are added last so they win.
-    for pattern in &repo.include {
-        overrides
-            .add(pattern)
-            .with_context(|| format!("{}: bad include glob {pattern:?}", repo.name))?;
-    }
-    for pattern in &repo.exclude {
-        overrides
-            .add(&format!("!{pattern}"))
-            .with_context(|| format!("{}: bad exclude glob {pattern:?}", repo.name))?;
-    }
-    let overrides = overrides
-        .build()
+    let overrides = repo
+        .build_overrides(root)
         .with_context(|| format!("{}: could not build the file filter", repo.name))?;
 
     let mut files = Vec::new();

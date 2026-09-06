@@ -28,8 +28,6 @@ const TOKEN_USERNAME: &str = "x-access-token";
 /// A cloned repository. Deleting this deletes the working tree.
 #[derive(Debug)]
 pub struct Checkout {
-    /// Config name of the repository this came from.
-    pub name: String,
     /// The directory to collect Markdown from: the clone root, or the
     /// configured `subdir` beneath it.
     pub walk_root: PathBuf,
@@ -89,7 +87,6 @@ impl Cloner {
 
         debug!(repo = %repo.name, %commit, "cloned");
         Ok(Checkout {
-            name: repo.name.clone(),
             walk_root,
             commit,
             _dir: dir,

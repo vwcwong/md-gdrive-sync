@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use ignore::overrides::OverrideBuilder;
+use ignore::overrides::{Override, OverrideBuilder};
 use serde::Deserialize;
 
 /// Google Docs tops out around 1.02M characters. Stay under it with room for
@@ -273,14 +273,9 @@ impl Repo {
         }
 
         // Compile the globs now so a bad pattern fails at `validate` time rather
-        // than midway through a scheduled run. Same engine `collect` uses, so a
-        // pattern that passes here cannot fail later with a different glob dialect.
-        let mut globs = OverrideBuilder::new(".");
-        for pattern in self.include.iter().chain(self.exclude.iter()) {
-            globs.add(pattern).map_err(|e| {
-                ConfigError::Invalid(format!("{}: invalid glob {:?}: {e}", self.name, pattern))
-            })?;
-        }
+        // than midway through a scheduled run.
+        self.build_overrides(Path::new("."))
+            .map_err(|e| ConfigError::Invalid(format!("{}: invalid glob: {e}", self.name)))?;
 
         if self.include.is_empty() {
             return Err(ConfigError::Invalid(format!(
@@ -290,6 +285,21 @@ impl Repo {
         }
 
         Ok(())
+    }
+
+    /// Builds the include/exclude matcher used by both validation and collection.
+    pub(crate) fn build_overrides(
+        &self,
+        root: &Path,
+    ) -> std::result::Result<Override, ignore::Error> {
+        let mut overrides = OverrideBuilder::new(root);
+        for pattern in &self.include {
+            overrides.add(pattern)?;
+        }
+        for pattern in &self.exclude {
+            overrides.add(&format!("!{pattern}"))?;
+        }
+        overrides.build()
     }
 }
 

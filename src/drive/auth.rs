@@ -203,7 +203,9 @@ fn extract_code(query: &str) -> Result<String> {
     let mut code = None;
     let mut error = None;
 
-    for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+    let callback = reqwest::Url::parse(&format!("http://localhost/?{query}"))
+        .context("parsing the OAuth redirect query")?;
+    for (key, value) in callback.query_pairs() {
         match key.as_ref() {
             "code" => code = Some(value.into_owned()),
             "error" => error = Some(value.into_owned()),

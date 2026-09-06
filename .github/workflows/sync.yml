@@ -34,16 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      # No Nix binary cache: the free Magic Nix Cache reached end of life in
-      # February 2025 and its replacement is a paid service. The toolchain comes
-      # prebuilt from cache.nixos.org; the cargo build is the real cost here.
       - uses: Swatinem/rust-cache@v2
 
-      - run: nix develop --command cargo fmt --check
-      - run: nix develop --command cargo clippy --all-targets
-      - run: nix develop --command cargo test
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked
+      - run: cargo test --locked
 
   sync:
     needs: check

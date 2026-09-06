@@ -3,10 +3,18 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
-use mdsync::config::Config;
-use mdsync::drive::auth::{self, OauthClient};
-use mdsync::sync;
 use tracing_subscriber::EnvFilter;
+
+mod clone;
+mod collect;
+mod config;
+mod drive;
+mod render;
+mod split;
+mod sync;
+
+use crate::config::Config;
+use crate::drive::auth::{self, OauthClient};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -140,20 +148,14 @@ fn run_sync(args: &SyncArgs) -> Result<()> {
     let config = Config::load(&args.config.config)
         .with_context(|| format!("loading {}", args.config.config.display()))?;
 
-    let options = sync::Options {
-        dry_run: args.dry_run,
-        out: args.out.clone(),
-        only: args.only.clone(),
-    };
+    let documents = sync::build(&config, &args.only)?;
 
-    let documents = sync::build(&config, &options)?;
-
-    let written = sync::write_local(&documents, &options.out)?;
+    let written = sync::write_local(&documents, &args.out)?;
     for path in &written {
         println!("wrote {}", path.display());
     }
 
-    if options.dry_run {
+    if args.dry_run {
         println!(
             "dry run: {} document(s), nothing published",
             documents.len()
@@ -161,7 +163,7 @@ fn run_sync(args: &SyncArgs) -> Result<()> {
         return Ok(());
     }
 
-    sync::publish(&config, &documents, &options)
+    sync::publish(&config, &documents, args.only.is_empty())
 }
 
 fn mint_token(args: &AuthArgs) -> Result<()> {
