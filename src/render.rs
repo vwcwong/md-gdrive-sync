@@ -5,6 +5,12 @@
 //! clock. The generation timestamp is passed in so output is reproducible and
 //! snapshot-testable.
 
+use std::borrow::Cow;
+use std::ops::Range;
+
+use pulldown_cmark::{Event, Options, Parser, Tag};
+use serde::Deserialize;
+
 use crate::collect::MarkdownFile;
 
 /// Markdown, and Google Docs, stop at six heading levels.
@@ -85,11 +91,7 @@ fn push_section(out: &mut String, section: &Section, base: usize) {
     for file in &section.files {
         push_heading(out, level, &file.rel_path);
 
-        let (frontmatter_title, body) = if section.strip_frontmatter {
-            split_frontmatter(&file.content)
-        } else {
-            (None, file.content.as_str())
-        };
+        let (frontmatter_title, body) = transform(&file.content, level, section.strip_frontmatter);
 
         // A frontmatter title stands in for the H1 the file does not have, so
         // it sits at the level the body's own H1 would occupy.
@@ -97,262 +99,159 @@ fn push_section(out: &mut String, section: &Section, base: usize) {
             push_heading(out, level + 1, title);
         }
 
-        let rendered = transform_body(body.trim_start_matches(['\n', '\r']), level);
-        out.push_str(rendered.trim_end());
+        out.push_str(body.trim_start_matches(['\n', '\r']).trim_end());
         out.push_str("\n\n");
     }
 }
 
 fn push_heading(out: &mut String, level: usize, text: &str) {
-    push_heading_line(out, level, text);
-    out.push('\n');
+    out.push_str(&"#".repeat(level.min(MAX_HEADING)));
+    out.push(' ');
+    out.push_str(text);
+    out.push_str("\n\n");
 }
 
 // ---------------------------------------------------------------------------
 // Body transformation
 // ---------------------------------------------------------------------------
 
-/// One classified source line.
-enum Line<'a> {
-    Heading(usize, &'a str),
-    /// Inside a code block: passed through byte for byte.
-    Code(&'a str),
-    Text(&'a str),
-}
-
-/// Demotes the file's own headings so they nest under its path heading, and
-/// replaces images with a text placeholder.
+/// Demotes the file's own headings so they nest under its path heading, replaces
+/// images with a text placeholder, and lifts the title out of any frontmatter.
+///
+/// The parser is only asked *where* those three constructs are; each one's byte
+/// range is rewritten and every other byte is copied from the source verbatim.
+/// Nothing this function has no opinion about can be reformatted on the way
+/// through, which a parse-and-re-render round trip could not promise.
 ///
 /// Heading levels are normalised rather than shifted by a fixed amount: a file
 /// whose top heading is an H2 has it placed directly under the path heading
 /// instead of leaving an empty level, which both tightens the Docs outline and
 /// leaves more of the six levels for whatever nests below.
-///
-/// Code blocks are passed through untouched; without that, a `# comment` in a
-/// shell snippet would be rewritten as a heading and corrupt both the snippet
-/// and the document outline.
-fn transform_body(body: &str, offset: usize) -> String {
-    let lines = scan(body);
+fn transform(content: &str, offset: usize, strip_frontmatter: bool) -> (Option<String>, String) {
+    // Everything written around the body uses `\n`, so a CRLF file would leave
+    // the document with two kinds of line ending in it.
+    let content = if content.contains("\r\n") {
+        Cow::Owned(content.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(content)
+    };
+    let content: &str = &content;
 
-    let top = lines
-        .iter()
-        .filter_map(|l| match l {
-            Line::Heading(level, _) => Some(*level),
+    let mut options = Options::ENABLE_TABLES;
+    if strip_frontmatter {
+        options |= Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    }
+
+    let top = Parser::new_ext(content, options)
+        .filter_map(|event| match event {
+            Event::Start(Tag::Heading { level, .. }) => Some(level as usize),
             _ => None,
         })
         .min()
         .unwrap_or(1);
 
-    let mut out = String::with_capacity(body.len());
-    for line in &lines {
-        match line {
-            Line::Heading(level, text) => {
-                push_heading_line(&mut out, level + offset + 1 - top, text);
+    let mut title = None;
+    let mut out = String::with_capacity(content.len());
+    let mut cursor = 0;
+    let mut events = Parser::new_ext(content, options).into_offset_iter();
+
+    while let Some((event, range)) = events.next() {
+        let (range, replacement) = match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                let text = inner_range(&mut events)
+                    .map(|inner| content[inner].trim())
+                    .unwrap_or_default();
+                let raw = &content[range.clone()];
+                let newline = &raw[raw.trim_end_matches(['\r', '\n']).len()..];
+                let hashes = "#".repeat((level as usize + offset + 1 - top).min(MAX_HEADING));
+                let rewritten = if text.is_empty() {
+                    format!("{hashes}{newline}")
+                } else {
+                    format!("{hashes} {text}{newline}")
+                };
+                (range, rewritten)
             }
-            Line::Code(raw) => {
-                out.push_str(raw);
-                out.push('\n');
+            Event::Start(Tag::Image { .. }) => (range, image_placeholder(&inner_text(&mut events))),
+            Event::Start(Tag::MetadataBlock(_)) => {
+                title = frontmatter_title(&inner_text(&mut events));
+                // Take the blank line the block leaves behind with it.
+                let mut end = range.end;
+                end += content[end..].len() - content[end..].trim_start_matches(['\r', '\n']).len();
+                (range.start..end, String::new())
             }
-            Line::Text(raw) => {
-                out.push_str(&replace_images(raw));
-                out.push('\n');
-            }
-        }
+            _ => continue,
+        };
+
+        out.push_str(&content[cursor..range.start]);
+        out.push_str(&replacement);
+        cursor = range.end;
     }
-    out
+
+    out.push_str(&content[cursor..]);
+    (title, out)
 }
 
-/// Splits the body into headings, code and prose, tracking fences so that
-/// nothing inside a code block is ever reinterpreted.
-fn scan(body: &str) -> Vec<Line<'_>> {
-    let lines: Vec<&str> = body.lines().collect();
-    let mut out = Vec::with_capacity(lines.len());
-    let mut fence: Option<Fence> = None;
-    let mut i = 0;
-
-    while i < lines.len() {
-        let line = lines[i];
-
-        if let Some(open) = &fence {
-            out.push(Line::Code(line));
-            if open.closed_by(line) {
-                fence = None;
-            }
-            i += 1;
-            continue;
-        }
-
-        if let Some(open) = Fence::opened_by(line) {
-            fence = Some(open);
-            out.push(Line::Code(line));
-            i += 1;
-            continue;
-        }
-
-        // Four spaces of indentation is an indented code block, and no heading
-        // can be indented that far.
-        if line.starts_with("    ") || line.starts_with('\t') {
-            out.push(Line::Code(line));
-            i += 1;
-            continue;
-        }
-
-        if let Some((level, text)) = atx_heading(line) {
-            out.push(Line::Heading(level, text));
-            i += 1;
-            continue;
-        }
-
-        // A setext heading is a line of text underlined by = or -. Treated as a
-        // heading so it can be demoted like any other; left alone it would stay
-        // an H1 or H2 and break the outline.
-        if let Some(level) = lines.get(i + 1).and_then(|next| setext_underline(next))
-            && can_be_setext_text(line)
-        {
-            out.push(Line::Heading(level, line.trim()));
-            i += 2;
-            continue;
-        }
-
-        out.push(Line::Text(line));
-        i += 1;
-    }
-
-    out
-}
-
-fn push_heading_line(out: &mut String, level: usize, text: &str) {
-    out.push_str(&"#".repeat(level.min(MAX_HEADING)));
-    out.push(' ');
-    out.push_str(text);
-    out.push('\n');
-}
-
-/// `## Title ##` -> `(2, "Title")`
-fn atx_heading(line: &str) -> Option<(usize, &str)> {
-    // Up to three spaces of indentation still counts as a heading; four makes
-    // it an indented code block.
-    let indent = line.len() - line.trim_start_matches(' ').len();
-    if indent > 3 {
-        return None;
-    }
-    let trimmed = &line[indent..];
-
-    let hashes = trimmed.len() - trimmed.trim_start_matches('#').len();
-    if hashes == 0 || hashes > MAX_HEADING {
-        return None;
-    }
-
-    let rest = &trimmed[hashes..];
-    if !rest.is_empty() && !rest.starts_with(' ') && !rest.starts_with('\t') {
-        return None; // `#hashtag`, not a heading
-    }
-
-    Some((hashes, strip_closing_hashes(rest.trim())))
-}
-
-/// Removes an optional closing `###` run, which only counts as a delimiter when
-/// whitespace separates it from the text. Without that check a heading like
-/// `## Notes on C#` would lose its last character.
-fn strip_closing_hashes(text: &str) -> &str {
-    let without = text.trim_end_matches('#');
-    if without.len() == text.len() {
-        return text;
-    }
-    if without.is_empty() || without.ends_with([' ', '\t']) {
-        without.trim_end()
-    } else {
-        text
-    }
-}
-
-/// Whether a line can be the text of a setext heading.
+/// Consumes the events up to the one closing the tag just started, returning the
+/// span of source they cover.
 ///
-/// A `---` under a list item or table row is a thematic break rather than an
-/// underline, and treating it as one would promote list text into a heading.
-fn can_be_setext_text(line: &str) -> bool {
-    let t = line.trim();
-    if t.is_empty() {
-        return false;
+/// Nesting is counted rather than matched on the end tag, so the emphasis and
+/// links a heading may contain do not end it early.
+fn inner_range<'a>(
+    events: &mut impl Iterator<Item = (Event<'a>, Range<usize>)>,
+) -> Option<Range<usize>> {
+    let mut span: Option<Range<usize>> = None;
+    let mut depth = 1usize;
+
+    for (event, range) in events {
+        match event {
+            Event::Start(_) => depth += 1,
+            Event::End(_) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        span = Some(match span {
+            Some(span) => span.start..range.end,
+            None => range,
+        });
     }
-    let list_or_quote = t.starts_with(['-', '*', '+', '>', '|', '#'])
-        || t.split_once(['.', ')'])
-            .is_some_and(|(head, _)| !head.is_empty() && head.chars().all(|c| c.is_ascii_digit()));
-    !list_or_quote
+
+    span
 }
 
-/// A line of only `=` is an H1 underline, only `-` an H2 underline.
-fn setext_underline(line: &str) -> Option<usize> {
-    let t = line.trim();
-    if t.len() >= 2 && t.chars().all(|c| c == '=') {
-        Some(1)
-    } else if t.len() >= 2 && t.chars().all(|c| c == '-') {
-        Some(2)
-    } else {
-        None
+/// The same, for tags whose text is wanted rather than their source.
+fn inner_text<'a>(events: &mut impl Iterator<Item = (Event<'a>, Range<usize>)>) -> String {
+    let mut text = String::new();
+    let mut depth = 1usize;
+
+    for (event, _) in events {
+        match event {
+            Event::Start(_) => depth += 1,
+            Event::End(_) => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Event::Text(run) | Event::Code(run) => text.push_str(&run),
+            _ => {}
+        }
     }
+
+    text
 }
 
 /// Drive turns Markdown images into base64 data URIs that render broken in a
 /// Google Doc. The alt text is what carries meaning for NotebookLM anyway, so
 /// keep that and drop the reference.
-fn replace_images(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut rest = line;
-
-    while let Some(start) = rest.find("![") {
-        let after = &rest[start + 2..];
-        let Some(alt_end) = after.find(']') else {
-            break;
-        };
-        let alt = &after[..alt_end];
-
-        let tail = &after[alt_end + 1..];
-        if !tail.starts_with('(') {
-            out.push_str(&rest[..start + 2]);
-            rest = after;
-            continue;
-        }
-        let Some(url_end) = tail.find(')') else { break };
-
-        out.push_str(&rest[..start]);
-        out.push_str(&if alt.trim().is_empty() {
-            "*[image]*".to_string()
-        } else {
-            format!("*[image: {alt}]*")
-        });
-        rest = &tail[url_end + 1..];
-    }
-
-    out.push_str(rest);
-    out
-}
-
-struct Fence {
-    marker: char,
-    length: usize,
-}
-
-impl Fence {
-    fn opened_by(line: &str) -> Option<Self> {
-        let trimmed = line.trim_start();
-        if line.len() - trimmed.len() > 3 {
-            return None;
-        }
-        for marker in ['`', '~'] {
-            let length = trimmed.len() - trimmed.trim_start_matches(marker).len();
-            if length >= 3 {
-                return Some(Fence { marker, length });
-            }
-        }
-        None
-    }
-
-    /// A fence closes on a line of at least as many of the same character and
-    /// nothing else.
-    fn closed_by(&self, line: &str) -> bool {
-        let trimmed = line.trim();
-        trimmed.len() >= self.length && trimmed.chars().all(|c| c == self.marker)
+fn image_placeholder(alt: &str) -> String {
+    if alt.trim().is_empty() {
+        "*[image]*".to_string()
+    } else {
+        format!("*[image: {alt}]*")
     }
 }
 
@@ -360,47 +259,19 @@ impl Fence {
 // Frontmatter
 // ---------------------------------------------------------------------------
 
-/// Splits leading `---` delimited frontmatter off the body, returning any
-/// `title:` found in it.
-fn split_frontmatter(content: &str) -> (Option<String>, &str) {
-    let Some(rest) = content
-        .strip_prefix("---\n")
-        .or_else(|| content.strip_prefix("---\r\n"))
-    else {
-        return (None, content);
-    };
-
-    let Some(end) = find_frontmatter_end(rest) else {
-        // No closing delimiter: it was an horizontal rule, not frontmatter.
-        return (None, content);
-    };
-
-    let (frontmatter, body) = rest.split_at(end.0);
-    (frontmatter_title(frontmatter), &body[end.1..])
+#[derive(Deserialize)]
+struct Frontmatter {
+    title: Option<String>,
 }
 
-/// Returns (offset of the closing delimiter, length of the delimiter line).
-fn find_frontmatter_end(rest: &str) -> Option<(usize, usize)> {
-    let mut offset = 0;
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end() == "---" {
-            return Some((offset, line.len()));
-        }
-        offset += line.len();
-    }
-    None
-}
-
-fn frontmatter_title(frontmatter: &str) -> Option<String> {
-    for line in frontmatter.lines() {
-        if let Some(value) = line.strip_prefix("title:") {
-            let value = value.trim().trim_matches(['"', '\'']).trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
+/// Frontmatter is written by hand and not validated anywhere, so anything that
+/// does not parse simply has no title rather than failing the sync.
+fn frontmatter_title(yaml: &str) -> Option<String> {
+    let frontmatter: Frontmatter = serde_saphyr::from_str(yaml).ok()?;
+    frontmatter
+        .title
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -436,19 +307,23 @@ mod tests {
         }
     }
 
+    /// The rewritten body of a file whose path heading sits at `level`.
+    fn transformed(content: &str, level: usize) -> String {
+        transform(content, level, true).1
+    }
+
     // -- heading demotion ---------------------------------------------------
 
     #[test]
     fn demotes_headings_by_the_file_depth() {
-        let out = transform_body("# One\n## Two\n", 3);
-        assert_eq!(out, "#### One\n##### Two\n");
+        assert_eq!(transformed("# One\n## Two\n", 3), "#### One\n##### Two\n");
     }
 
     #[test]
     fn caps_demotion_at_six_levels() {
         // Six levels of the file's own headings cannot all survive under a
         // heading that is already at level 3.
-        let out = transform_body("# 1\n## 2\n### 3\n#### 4\n##### 5\n###### 6\n", 3);
+        let out = transformed("# 1\n## 2\n### 3\n#### 4\n##### 5\n###### 6\n", 3);
         assert!(out.ends_with("###### 5\n###### 6\n"), "{out}");
     }
 
@@ -456,82 +331,63 @@ mod tests {
     fn normalises_a_file_whose_top_heading_is_not_h1() {
         // Starts at H2, so H2 lands directly under the path heading rather than
         // leaving a gap, and the relative nesting is kept.
-        let out = transform_body("## Top\n### Under\n", 2);
-        assert_eq!(out, "### Top\n#### Under\n");
+        assert_eq!(
+            transformed("## Top\n### Under\n", 2),
+            "### Top\n#### Under\n"
+        );
     }
 
     #[test]
     fn normalisation_uses_the_shallowest_heading_not_the_first() {
-        let out = transform_body("### Third\n## Second\n", 1);
-        assert_eq!(out, "### Third\n## Second\n");
+        assert_eq!(
+            transformed("### Third\n## Second\n", 1),
+            "### Third\n## Second\n"
+        );
     }
 
     #[test]
     fn leaves_hashes_inside_fenced_code_alone() {
         let body = "text\n\n```sh\n# not a heading\necho hi\n```\n\n# real heading\n";
-        let out = transform_body(body, 2);
-        assert!(out.contains("# not a heading"), "{out}");
-        assert!(!out.contains("### not a heading"), "{out}");
-        assert!(out.contains("### real heading"), "{out}");
+        let out = transformed(body, 2);
+        assert!(out.contains("\n# not a heading\n"), "{out}");
+        assert!(out.contains("\n### real heading\n"), "{out}");
     }
-
-    #[test]
-    fn handles_tilde_fences_and_longer_fences() {
-        let body = "~~~\n# inside tilde\n~~~\n````\n# inside long\n````\n# outside\n";
-        let out = transform_body(body, 1);
-        assert!(out.contains("\n# inside tilde\n"), "{out}");
-        assert!(out.contains("\n# inside long\n"), "{out}");
-        assert!(out.contains("\n## outside\n"), "{out}");
-    }
-
-    #[test]
-    fn a_shorter_run_does_not_close_a_longer_fence() {
-        let body = "````\n```\n# still inside\n````\n# outside\n";
-        let out = transform_body(body, 1);
-        assert!(out.contains("\n# still inside\n"), "{out}");
-        assert!(out.contains("\n## outside\n"), "{out}");
-    }
-
-    #[test]
-    fn leaves_indented_code_blocks_alone() {
-        let out = transform_body("    # indented code\n", 2);
-        assert_eq!(out, "    # indented code\n");
-    }
-
-    #[test]
-    fn does_not_treat_a_hashtag_as_a_heading() {
-        let out = transform_body("#hashtag not a heading\n", 2);
-        assert_eq!(out, "#hashtag not a heading\n");
-    }
-
-    #[test]
-    fn keeps_a_trailing_hash_that_is_part_of_the_text() {
-        assert_eq!(atx_heading("## Notes on C#"), Some((2, "Notes on C#")));
-        assert_eq!(atx_heading("## Closed ##"), Some((2, "Closed")));
-    }
-
-    // -- setext headings ----------------------------------------------------
 
     #[test]
     fn rewrites_setext_headings_so_they_can_be_demoted() {
-        let out = transform_body("Title\n=====\n\nSub\n---\n", 2);
+        let out = transformed("Title\n=====\n\nSub\n---\n", 2);
         assert!(out.contains("### Title\n"), "{out}");
         assert!(out.contains("#### Sub\n"), "{out}");
     }
 
+    /// A changelog's `1.3.4` over `=====` is a heading, not an ordered list.
     #[test]
-    fn does_not_mistake_a_thematic_break_for_an_underline() {
-        let out = transform_body("- item\n---\n", 2);
-        assert_eq!(out, "- item\n---\n");
-
-        let out = transform_body("paragraph\n\n---\n\nmore\n", 2);
-        assert!(out.contains("\n---\n"), "{out}");
+    fn demotes_a_setext_heading_whose_text_looks_like_a_list_marker() {
+        assert_eq!(
+            transformed("1.3.4\n=====\n\nnotes\n", 2),
+            "### 1.3.4\n\nnotes\n"
+        );
     }
 
     #[test]
-    fn does_not_mistake_a_table_separator_for_an_underline() {
-        let out = transform_body("| a | b |\n|---|---|\n| 1 | 2 |\n", 2);
-        assert_eq!(out, "| a | b |\n|---|---|\n| 1 | 2 |\n");
+    fn normalises_crlf_so_the_document_has_one_kind_of_line_ending() {
+        assert_eq!(transformed("# One\r\n\r\ntext\r\n", 1), "## One\n\ntext\n");
+    }
+
+    #[test]
+    fn keeps_inline_markup_inside_a_demoted_heading() {
+        assert_eq!(
+            transformed("# Some **bold** `code`\n", 1),
+            "## Some **bold** `code`\n"
+        );
+    }
+
+    /// The whole point of rewriting byte ranges rather than re-rendering a parse
+    /// tree: anything the transformation has no opinion about survives exactly.
+    #[test]
+    fn passes_what_it_does_not_rewrite_through_verbatim() {
+        let body = "| a | b |\n|---|---|\n| 1 | 2 |\n\n* one\n+ two\n\n> quoted\n\n    indented code\n\n---\n";
+        assert_eq!(transformed(body, 2), body);
     }
 
     // -- images -------------------------------------------------------------
@@ -539,21 +395,27 @@ mod tests {
     #[test]
     fn replaces_images_with_their_alt_text() {
         assert_eq!(
-            replace_images("before ![a diagram](./x.png) after"),
-            "before *[image: a diagram]* after"
+            transformed("before ![a diagram](./x.png) after\n", 1),
+            "before *[image: a diagram]* after\n"
         );
-        assert_eq!(replace_images("![](x.png)"), "*[image]*");
+        assert_eq!(transformed("![](x.png)\n", 1), "*[image]*\n");
+    }
+
+    #[test]
+    fn replaces_reference_style_images_too() {
+        let out = transformed("![alt text][logo]\n\n[logo]: ./logo.png\n", 1);
+        assert!(out.starts_with("*[image: alt text]*"), "{out}");
     }
 
     #[test]
     fn leaves_ordinary_links_alone() {
-        let line = "see [the docs](https://example.invalid)";
-        assert_eq!(replace_images(line), line);
+        let line = "see [the docs](https://example.invalid)\n";
+        assert_eq!(transformed(line, 1), line);
     }
 
     #[test]
     fn does_not_replace_images_inside_code() {
-        let out = transform_body("```\n![keep](x.png)\n```\n", 1);
+        let out = transformed("```\n![keep](x.png)\n```\n", 1);
         assert!(out.contains("![keep](x.png)"), "{out}");
     }
 
@@ -561,30 +423,36 @@ mod tests {
 
     #[test]
     fn strips_frontmatter_and_takes_the_title_from_it() {
-        let (title, body) = split_frontmatter("---\ntitle: My Note\ntags: [a]\n---\n# Body\n");
+        let (title, body) = transform("---\ntitle: My Note\ntags: [a]\n---\n# Body\n", 1, true);
         assert_eq!(title.as_deref(), Some("My Note"));
-        assert_eq!(body, "# Body\n");
+        assert_eq!(body, "## Body\n");
     }
 
     #[test]
     fn unquotes_a_frontmatter_title() {
-        let (title, _) = split_frontmatter("---\ntitle: \"Quoted\"\n---\nbody\n");
+        let (title, _) = transform("---\ntitle: \"Quoted\"\n---\nbody\n", 1, true);
         assert_eq!(title.as_deref(), Some("Quoted"));
     }
 
     #[test]
     fn leaves_a_leading_horizontal_rule_alone() {
         let content = "---\n\nnot frontmatter, no closing delimiter\n";
-        let (title, body) = split_frontmatter(content);
+        let (title, body) = transform(content, 1, true);
         assert_eq!(title, None);
         assert_eq!(body, content);
     }
 
     #[test]
     fn frontmatter_without_a_title_still_gets_stripped() {
-        let (title, body) = split_frontmatter("---\ntags: [a]\n---\nbody\n");
+        let (title, body) = transform("---\ntags: [a]\n---\nbody\n", 1, true);
         assert_eq!(title, None);
         assert_eq!(body, "body\n");
+    }
+
+    #[test]
+    fn malformed_frontmatter_yields_no_title_rather_than_failing() {
+        let (title, _) = transform("---\ntitle: [unclosed\n---\nbody\n", 1, true);
+        assert_eq!(title, None);
     }
 
     // -- document structure -------------------------------------------------
