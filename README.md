@@ -1,11 +1,10 @@
 # md-gdrive-sync
 
-Publish Markdown from git repositories into a Google Drive folder as Google
-Docs — one document per repository, plus an optional combined document of
-everything.
+Keep NotebookLM sources current by syncing Markdown from Git
+repositories into Google Drive.
 
-Each run updates the existing files rather than creating new ones, so sources
-you have already attached in NotebookLM (or anywhere else) keep working.
+One document per repository, plus an optional combined document of
+everything.
 
 ## What you get
 
