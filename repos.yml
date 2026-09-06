@@ -21,3 +21,6 @@ defaults:
 repos:
   - url: https://github.com/vwcwong/COMP9315
     name: "COMP9315 - Database Systems Implementation"
+  - url: https://github.com/vwcwong/hello-interview-study
+    name: "Hello Interview - System Design Study"
+    private: true
