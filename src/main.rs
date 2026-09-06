@@ -148,8 +148,6 @@ fn run_sync(args: &SyncArgs) -> Result<()> {
 
     let documents = sync::build(&config, &options)?;
 
-    // Written on every run, not just dry ones: a scheduled run then leaves an
-    // artifact that can be inspected without Drive access.
     let written = sync::write_local(&documents, &options.out)?;
     for path in &written {
         println!("wrote {}", path.display());

@@ -14,7 +14,6 @@ use crate::drive::auth::{self, OauthClient};
 use crate::drive::files::{DriveClient, Upsert};
 use crate::render::{self, Section};
 
-/// Environment variable holding the PAT used for repositories marked private.
 pub use crate::clone::TOKEN_VAR;
 
 #[derive(Debug, Clone)]
@@ -99,10 +98,8 @@ pub fn build(config: &Config, options: &Options) -> Result<Vec<Document>> {
     Ok(documents)
 }
 
-/// Publishes each document to the configured Drive folder.
-///
-/// Existing documents are updated in place rather than replaced, so their Drive
-/// IDs survive and NotebookLM sources stay linked across runs.
+/// Publishes each document to the configured Drive folder, updating existing
+/// documents in place rather than replacing them.
 pub fn publish(config: &Config, documents: &[Document], options: &Options) -> Result<()> {
     let oauth = OauthClient::from_env().context(
         "Google credentials are missing; run `mdsync auth` and set GOOGLE_CLIENT_ID, \
