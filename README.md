@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: vwcwong/md-gdrive-sync@v0.1.0
+      - uses: vwcwong/md-gdrive-sync@v1.0.0
         with:
           config: repos.yml
         env:
