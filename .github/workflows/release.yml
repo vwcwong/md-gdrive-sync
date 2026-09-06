@@ -1,17 +1,111 @@
 name: release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which semver field to increment
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
 
 permissions:
   contents: write
+
+# Two releases must not race tags or Cargo.toml.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Require main
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Releases must be cut from main (got ${GITHUB_REF})." >&2
+            exit 1
+          fi
+
+      - name: Resolve next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          cargo_ver="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n1)"
+          latest_tag="$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1 || true)"
+          tag_ver="${latest_tag#v}"
+
+          current="$(printf '%s\n%s\n' "$cargo_ver" "$tag_ver" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)"
+          if [[ -z "$current" ]]; then
+            echo "could not determine the current version" >&2
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<<"$current"
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "unknown bump: $BUMP" >&2; exit 1 ;;
+          esac
+
+          version="${major}.${minor}.${patch}"
+          tag="v${version}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "tag ${tag} already exists" >&2
+            exit 1
+          fi
+
+          echo "current=${current}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${current} --${BUMP}-> ${version}"
+
+      - name: Bump crate version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+
+          toml = Path("Cargo.toml")
+          text = toml.read_text()
+          new, n = re.subn(r'(?m)^version = "[^"]+"', f'version = "{version}"', text, count=1)
+          if n != 1:
+              raise SystemExit(f"expected to update exactly one Cargo.toml version, updated {n}")
+          toml.write_text(new)
+
+          lock = Path("Cargo.lock")
+          lock_text = lock.read_text()
+          new_lock, n = re.subn(
+              r'(name = "mdsync"\n)version = "[^"]+"',
+              rf'\g<1>version = "{version}"',
+              lock_text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit(f"expected to update exactly one Cargo.lock mdsync version, updated {n}")
+          lock.write_text(new_lock)
+          PY
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -28,8 +122,24 @@ jobs:
       - name: Stage the release binary
         run: cp target/release/mdsync mdsync-x86_64-unknown-linux-gnu
 
+      - name: Commit, tag, and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: Release ${TAG}"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "$TAG"
+
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           files: mdsync-x86_64-unknown-linux-gnu
           fail_on_unmatched_files: true
           generate_release_notes: true
