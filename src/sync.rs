@@ -21,7 +21,7 @@ pub struct Options {
     /// Render to disk and skip Google Drive entirely.
     pub dry_run: bool,
     /// Where rendered Markdown is written. Written on every run, not just dry ones,
-    /// so a scheduled run leaves an artifact that can be diffed without Drive access.
+    /// so a local dry run can be inspected without Drive access.
     pub out: PathBuf,
     /// Restrict the run to these repositories, by config name.
     pub only: Vec<String>,

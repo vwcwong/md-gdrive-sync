@@ -56,9 +56,10 @@ of the Drive folder's URL.
 - `NOTES_REPO_TOKEN` — a GitHub token that can clone private repos; skip it
   if every repo is public
 
-**First run** — trigger the workflow by hand with *dry run* ticked. The
-rendered Markdown is uploaded as an artifact and Drive is left untouched.
-When that looks right, run it for real and let the daily schedule take over.
+**First run** — `cargo run -- sync --dry-run` and inspect `./out`. CI does
+not upload that folder: it would publish private-repo contents as a public
+artifact. When the local render looks right, trigger the workflow for real
+and let the daily schedule take over.
 
 ## Commands
 
