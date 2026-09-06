@@ -1,16 +1,16 @@
 # md-gdrive-sync
 
-If your notes live in Git, one convenient way to use them in NotebookLM is as
-Google Docs in Drive. This publishes Markdown from a list of repos into a
-folder there — one document per repo, plus a combined document of everything.
+Publish Markdown from git repositories into a Google Drive folder as Google
+Docs — one document per repository, plus an optional combined document of
+everything.
 
 Each run updates the existing files rather than creating new ones, so sources
-you have already attached keep working.
+you have already attached in NotebookLM (or anywhere else) keep working.
 
-## Output
+## What you get
 
-Each file becomes a section titled with its full path. Headings inside the
-file nest underneath:
+Each Markdown file becomes a section titled with its path. Headings inside
+the file nest underneath:
 
 ```
 ## docs/api/auth.md
@@ -20,83 +20,138 @@ file nest underneath:
 
 Frontmatter is stripped; a `title:` field is used as the heading instead.
 Code blocks are unchanged. Images become a text placeholder. Dotfiles and
-anything matched by `.gitignore` are skipped.
+anything matched by `.gitignore` are skipped. Documents that would exceed
+Google Docs' size limit are split at file boundaries.
 
-## Setup
+## Use it in your repository
 
-```sh
-direnv allow        # or: nix develop
-cargo test
+The usual setup is a `repos.yml` plus a GitHub Actions workflow that runs on
+a schedule.
+
+### 1. List the repositories to publish
+
+Create a `repos.yml` in the repository that will run the workflow:
+
+```yaml
+drive:
+  folder_id: ${GDRIVE_FOLDER_ID}
+  combined_doc_name: "Notes — All Repos"
+  emit_combined: true
+  emit_per_repo: true
+  prune_orphans: true
+
+repos:
+  - url: https://github.com/owner/notes
+    name: "Personal Notes"
+  - url: https://github.com/owner/work-notes
+    name: "Work Notes"
+    private: true
 ```
 
-**Google Cloud** — create a project, enable the Drive API, then:
+`${GDRIVE_FOLDER_ID}` is filled from the environment. The folder ID is the
+last segment of the Drive folder's URL.
+
+`name` is the Google Doc title. If you omit it, the last path segment of
+`url` is used. Names must be unique. Private repositories need
+`private: true` and a `NOTES_REPO_TOKEN` secret that can clone them (HTTPS
+only; SSH remotes are not supported).
+
+A fuller example, including include/exclude globs, branches, and local
+`file://` paths, is in [`repo.examples.yaml`](repo.examples.yaml).
+
+### 2. Create a Google Cloud OAuth client
+
+Create a Google Cloud project, enable the Drive API, then:
 
 1. Publish the OAuth consent screen. If you leave it in *Testing*, the
    refresh token expires every 7 days.
 2. Create an OAuth client ID of type **Desktop app**. Do not use a service
    account.
 
-**Refresh token**
+The app only requests the `drive.file` scope: it can create and update files
+it owns, and cannot see the rest of your Drive.
+
+### 3. Mint a refresh token
+
+This step is interactive and only needs to happen once. Install the CLI and
+run:
 
 ```sh
+cargo install --git https://github.com/vwcwong/md-gdrive-sync
 export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...
-cargo run -- auth
+mdsync auth
 ```
 
-**Configure** — edit `repos.yml`, then
-`GDRIVE_FOLDER_ID=<id> cargo run -- validate`. The folder ID is the last segment
-of the Drive folder's URL.
+Store the printed token as `GOOGLE_REFRESH_TOKEN` on the repository that
+will run the workflow. `auth` is not part of the Action.
 
-**Secrets** — under *Settings → Secrets and variables → Actions*:
+### 4. Add repository secrets
 
-- `GDRIVE_FOLDER_ID` — destination Drive folder
-- `GOOGLE_CLIENT_ID` — OAuth client ID from the Desktop app
-- `GOOGLE_CLIENT_SECRET` — matching client secret
-- `GOOGLE_REFRESH_TOKEN` — from `cargo run -- auth`
-- `NOTES_REPO_TOKEN` — a GitHub token that can clone private repos; skip it
-  if every repo is public
+Under *Settings → Secrets and variables → Actions*:
 
-**First run** — `cargo run -- sync --dry-run` and inspect `./out`. CI does
-not upload that folder: it would publish private-repo contents as a public
-artifact. When the local render looks right, trigger the workflow for real
-and let the daily schedule take over.
+| Secret | Purpose |
+| --- | --- |
+| `GDRIVE_FOLDER_ID` | Destination Drive folder |
+| `GOOGLE_CLIENT_ID` | OAuth client ID from the Desktop app |
+| `GOOGLE_CLIENT_SECRET` | Matching client secret |
+| `GOOGLE_REFRESH_TOKEN` | From `mdsync auth` |
+| `NOTES_REPO_TOKEN` | GitHub token that can clone private repos; omit if every repo is public |
 
-## GitHub Action
+### 5. Add a workflow
 
-Other repositories can run the same publish path with a step. Pin a release
-tag so the runner downloads the Linux binary instead of compiling:
+Pin a release tag so the runner downloads the Linux binary instead of
+compiling:
 
 ```yaml
-- uses: actions/checkout@v5
-- uses: vwcwong/md-gdrive-sync@v0.1.0
-  with:
-    config: repos.yml
-  env:
-    GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-    GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-    GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-    GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
-    NOTES_REPO_TOKEN: ${{ secrets.NOTES_REPO_TOKEN }}
+name: sync
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: vwcwong/md-gdrive-sync@v0.1.0
+        with:
+          config: repos.yml
+        env:
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          NOTES_REPO_TOKEN: ${{ secrets.NOTES_REPO_TOKEN }}
 ```
 
-`auth` is not part of the action: mint the refresh token locally, then store
-it as a secret on the calling repository. Inputs are `config`, `dry-run`,
-`out`, `only`, and `version`. Secrets stay in `env` so they are not logged
-as inputs.
+Optional inputs: `dry-run` (`true` to render without uploading), `out`
+(directory for the rendered Markdown, default `out`), `only` (comma-separated
+repo names; skips pruning), and `version` (override which binary to download).
 
-This repository's `sync` workflow uses `uses: ./` with `version: source` so
-a scheduled run always matches the commit it is building. Push a `v*` tag to
-cut a GitHub Release and attach the Linux x64 binary other repos download.
+Do not upload the `out` folder as a workflow artifact if any source repo is
+private: that would publish its contents to anyone who can see the run.
 
-## Commands
+## Preview locally
+
+Before the first real upload, render without touching Drive:
 
 ```sh
-cargo run -- validate                       # check repos.yml, no network
-cargo run -- sync --dry-run                 # render to ./out, skip Drive
-cargo run -- sync                           # render and publish
-cargo run -- sync --only "Personal Notes"   # one repo (skips pruning)
-cargo run -- auth                           # get a refresh token
+export GDRIVE_FOLDER_ID=...
+mdsync validate
+mdsync sync --dry-run
+```
+
+Inspect `./out`. When it looks right, run `mdsync sync` or trigger the
+workflow.
+
+```sh
+mdsync validate                       # check repos.yml, no network
+mdsync sync --dry-run                 # render to ./out, skip Drive
+mdsync sync                           # render and publish
+mdsync sync --only "Personal Notes"   # one repo (skips pruning)
+mdsync auth                           # get a refresh token
 ```
 
 Rendered Markdown is always written to `./out`, even when Drive is skipped.
-
