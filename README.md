@@ -18,11 +18,6 @@ the file nest underneath:
 #### Tokens
 ```
 
-Frontmatter is stripped; a `title:` field is used as the heading instead.
-Code blocks are unchanged. Images become a text placeholder. Dotfiles and
-anything matched by `.gitignore` are skipped. Documents that would exceed
-Google Docs' size limit are split at file boundaries.
-
 ## Use it in your repository
 
 The usual setup is a `repos.yml` plus a GitHub Actions workflow that runs on
