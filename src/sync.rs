@@ -161,10 +161,9 @@ fn prune(drive: &DriveClient, folder_id: &str, documents: &[Document]) -> Result
 
 /// Renders `sections` into as many documents as the size limit requires.
 ///
-/// Google Docs stops accepting content near 1.02M characters, and NotebookLM
-/// caps a source at 500k words, so an oversized document is split rather than
-/// silently truncated by Drive. Splits fall on file boundaries: half a note is
-/// worse than a second document.
+/// Drive truncates an oversized document silently and NotebookLM caps a source
+/// at 500k words, so it is split instead — on file boundaries, since half a note
+/// is worse than a second document.
 fn documents_for(
     name: &str,
     sections: &[Section],
@@ -207,9 +206,8 @@ fn part_name(name: &str, index: usize) -> String {
 
 /// Packs files into groups that should each render within `max_chars`.
 ///
-/// Sizes are estimated from the source rather than by rendering candidates and
-/// measuring, which would be quadratic; the rendered result is checked
-/// afterwards and warned about if the estimate was beaten.
+/// Sizes are estimated from the source; measuring by rendering candidates would
+/// be quadratic. The rendered result is checked afterwards.
 fn split_sections(sections: &[Section], max_chars: usize) -> Vec<Vec<Section>> {
     let overhead = DOCUMENT_OVERHEAD + PER_SECTION_OVERHEAD * sections.len();
     let budget = max_chars.saturating_sub(overhead).max(1);

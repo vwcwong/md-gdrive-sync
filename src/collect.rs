@@ -20,9 +20,9 @@ pub struct MarkdownFile {
 
 /// Collects the Markdown under `root` that the repo's include/exclude globs select.
 ///
-/// Files ignored by the repository's own `.gitignore`, and dotfiles, are skipped:
-/// if a note is not worth committing it is not worth syncing, and directories
-/// like `.obsidian/` are editor state rather than notes.
+/// Files ignored by the repository's own `.gitignore`, and dotfiles, are
+/// skipped: a note not worth committing is not worth syncing, and `.obsidian/`
+/// is editor state rather than notes.
 pub fn collect(root: &Path, repo: &Repo) -> Result<Vec<MarkdownFile>> {
     let mut overrides = OverrideBuilder::new(root);
 
@@ -80,15 +80,12 @@ pub fn collect(root: &Path, repo: &Repo) -> Result<Vec<MarkdownFile>> {
     Ok(files)
 }
 
-/// Orders paths the way the rendered document should read: within a directory,
-/// its own files first, then its subdirectories, each group alphabetical.
+/// Orders paths so a directory's own files come before its subdirectories, each
+/// group alphabetical: a folder's notes read as an introduction to whatever is
+/// nested under it.
 ///
-/// Putting a directory's files ahead of its subdirectories means a folder's own
-/// notes appear under its heading before the headings for anything nested
-/// inside it, the way an introduction precedes its subsections.
-///
-/// The ordering is total and content-independent, so an unchanged set of files
-/// renders byte-for-byte identically on every run.
+/// Total and content-independent, so an unchanged set of files renders
+/// identically on every run.
 fn sort_key(rel_path: &str) -> Vec<(u8, &str)> {
     let count = rel_path.split('/').count();
     rel_path

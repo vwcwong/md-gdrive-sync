@@ -48,9 +48,8 @@ impl DriveClient {
 
     /// Creates the document, or replaces the content of the one already there.
     ///
-    /// Reusing the existing file keeps its Drive ID stable, which is what lets a
-    /// NotebookLM source stay linked across runs instead of having to be removed
-    /// and re-added every time.
+    /// Reusing the existing file keeps its Drive ID stable, so a NotebookLM
+    /// source stays linked across runs instead of needing to be re-added.
     pub fn upsert_doc(&self, folder_id: &str, name: &str, markdown: &str) -> Result<Upsert> {
         match self.find_in_folder(folder_id, name)? {
             Some(existing) => {
@@ -69,9 +68,8 @@ impl DriveClient {
 
     /// Looks up a document by exact name within a folder.
     ///
-    /// Under the drive.file scope this only ever sees files this application
-    /// created, so no separate state file is needed to remember IDs, and losing
-    /// one cannot orphan anything.
+    /// Under the drive.file scope this only sees files this application created,
+    /// so no state file is needed to remember IDs.
     pub fn find_in_folder(&self, folder_id: &str, name: &str) -> Result<Option<DriveFile>> {
         let query = format!(
             "name = '{}' and '{}' in parents and trashed = false",

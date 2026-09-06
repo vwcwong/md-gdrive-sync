@@ -28,10 +28,8 @@ pub struct Section {
 
 /// Renders `sections` into one document titled `title`.
 ///
-/// A document holding a single repository omits the per-repository heading,
-/// since the document title already names it; that also lifts everything inside
-/// it one level, leaving more of the six available heading levels for deep
-/// directory trees.
+/// A single-repository document omits the per-repository heading, which the
+/// title already names, freeing a level for deep directory trees.
 pub fn render(title: &str, sections: &[Section], generated_at: &str) -> String {
     let mut out = String::new();
 
@@ -79,12 +77,10 @@ fn push_provenance(out: &mut String, sections: &[Section], generated_at: &str) {
 /// Emits one heading per file carrying its full path, rather than a heading per
 /// directory level.
 ///
-/// Six heading levels is not enough for a document title, a repository, a
-/// directory tree and then the file's own headings: at two directories deep the
-/// file's internal structure collapses into a run of H6 siblings. The path in a
-/// heading conveys the directory structure losslessly, whereas squashed content
-/// headings lose it for good, so the directory tree gives up its levels and
-/// every file gets the same budget no matter how deep it sits.
+/// Six levels cannot cover a title, a repository, a directory tree and the
+/// file's own headings, so the tree gives up its levels: a path in a heading
+/// conveys the structure losslessly, whereas squashed content headings lose it
+/// for good.
 fn push_section(out: &mut String, section: &Section, base: usize) {
     let level = base + 1;
 
@@ -111,22 +107,14 @@ fn push_heading(out: &mut String, level: usize, text: &str) {
     out.push_str("\n\n");
 }
 
-// ---------------------------------------------------------------------------
-// Body transformation
-// ---------------------------------------------------------------------------
-
-/// Demotes the file's own headings so they nest under its path heading, replaces
-/// images with a text placeholder, and lifts the title out of any frontmatter.
+/// Demotes headings, replaces images with a placeholder, and lifts the title out
+/// of any frontmatter.
 ///
-/// The parser is only asked *where* those three constructs are; each one's byte
-/// range is rewritten and every other byte is copied from the source verbatim.
-/// Nothing this function has no opinion about can be reformatted on the way
-/// through, which a parse-and-re-render round trip could not promise.
+/// Only those three byte ranges are rewritten; everything else is copied
+/// verbatim, so nothing else can be reformatted on the way through.
 ///
-/// Heading levels are normalised rather than shifted by a fixed amount: a file
-/// whose top heading is an H2 has it placed directly under the path heading
-/// instead of leaving an empty level, which both tightens the Docs outline and
-/// leaves more of the six levels for whatever nests below.
+/// Levels are normalised, not shifted: a file starting at H2 lands directly
+/// under the path heading rather than leaving a gap.
 fn transform(content: &str, offset: usize, strip_frontmatter: bool) -> (Option<String>, String) {
     // Everything written around the body uses `\n`, so a CRLF file would leave
     // the document with two kinds of line ending in it.
@@ -191,11 +179,8 @@ fn transform(content: &str, offset: usize, strip_frontmatter: bool) -> (Option<S
     (title, out)
 }
 
-/// Consumes the events up to the one closing the tag just started, returning the
-/// span of source they cover.
-///
-/// Nesting is counted rather than matched on the end tag, so the emphasis and
-/// links a heading may contain do not end it early.
+/// Consumes the events closing the tag just started, returning the source they
+/// span. Nesting is counted, so emphasis inside a heading does not end it early.
 fn inner_range<'a>(
     events: &mut impl Iterator<Item = (Event<'a>, Range<usize>)>,
 ) -> Option<Range<usize>> {
@@ -255,10 +240,6 @@ fn image_placeholder(alt: &str) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Frontmatter
-// ---------------------------------------------------------------------------
-
 #[derive(Deserialize)]
 struct Frontmatter {
     title: Option<String>,
@@ -273,10 +254,6 @@ fn frontmatter_title(yaml: &str) -> Option<String> {
         .map(|title| title.trim().to_string())
         .filter(|title| !title.is_empty())
 }
-
-// ---------------------------------------------------------------------------
-// Small helpers
-// ---------------------------------------------------------------------------
 
 fn short_commit(commit: &str) -> &str {
     &commit[..commit.len().min(8)]
@@ -311,8 +288,6 @@ mod tests {
     fn transformed(content: &str, level: usize) -> String {
         transform(content, level, true).1
     }
-
-    // -- heading demotion ---------------------------------------------------
 
     #[test]
     fn demotes_headings_by_the_file_depth() {
@@ -390,8 +365,6 @@ mod tests {
         assert_eq!(transformed(body, 2), body);
     }
 
-    // -- images -------------------------------------------------------------
-
     #[test]
     fn replaces_images_with_their_alt_text() {
         assert_eq!(
@@ -418,8 +391,6 @@ mod tests {
         let out = transformed("```\n![keep](x.png)\n```\n", 1);
         assert!(out.contains("![keep](x.png)"), "{out}");
     }
-
-    // -- frontmatter --------------------------------------------------------
 
     #[test]
     fn strips_frontmatter_and_takes_the_title_from_it() {
@@ -454,8 +425,6 @@ mod tests {
         let (title, _) = transform("---\ntitle: [unclosed\n---\nbody\n", 1, true);
         assert_eq!(title, None);
     }
-
-    // -- document structure -------------------------------------------------
 
     #[test]
     fn single_repo_document_omits_the_repo_heading() {
