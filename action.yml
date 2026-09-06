@@ -1,0 +1,103 @@
+name: md-gdrive-sync
+description: >
+  Clone Markdown from configured git repositories and publish it as Google Docs.
+  Requires GDRIVE_FOLDER_ID, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and
+  GOOGLE_REFRESH_TOKEN in the environment. Set NOTES_REPO_TOKEN to clone
+  private repositories. Mint the refresh token locally with `mdsync auth`.
+author: vwcwong
+
+inputs:
+  config:
+    description: Path to repos.yml, relative to the workspace.
+    required: false
+    default: repos.yml
+  dry-run:
+    description: Render documents to disk and skip Google Drive.
+    required: false
+    default: "false"
+  out:
+    description: Directory for rendered Markdown. Written on every run.
+    required: false
+    default: out
+  only:
+    description: >
+      Restrict the run to these repositories, by config name. Comma or
+      newline separated. Skips pruning, same as `mdsync sync --only`.
+    required: false
+    default: ""
+  version:
+    description: >
+      mdsync to run. A tag such as v0.1.0 downloads that release binary.
+      `source` builds from this action's checkout. The default downloads
+      the binary matching the action's tag, or builds from source if this
+      is a branch / local path / a tag with no release asset.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve mdsync
+      id: install
+      shell: bash
+      env:
+        GITHUB_ACTION_REPOSITORY: ${{ github.action_repository }}
+        GITHUB_ACTION_REF: ${{ github.action_ref }}
+        GITHUB_TOKEN: ${{ github.token }}
+        MDSYNC_VERSION: ${{ inputs.version }}
+      run: bash "${{ github.action_path }}/scripts/install-mdsync.sh"
+
+    - name: Install Rust
+      if: steps.install.outputs.method == 'source'
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache cargo build
+      if: steps.install.outputs.method == 'source'
+      uses: Swatinem/rust-cache@v2
+      with:
+        # Default workspace is the caller checkout. That matches `uses: ./`;
+        # a tagged download never reaches this step.
+        prefix-key: mdsync-action
+
+    - name: Build mdsync
+      if: steps.install.outputs.method == 'source'
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        CARGO_TERM_COLOR: always
+      run: |
+        set -euo pipefail
+        cargo build --release --locked
+        mkdir -p "${RUNNER_TEMP}/mdsync-bin"
+        install -m 755 target/release/mdsync "${RUNNER_TEMP}/mdsync-bin/mdsync"
+        echo "${RUNNER_TEMP}/mdsync-bin" >> "${GITHUB_PATH}"
+
+    - name: Sync Markdown to Google Drive
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        MDSYNC_CONFIG: ${{ inputs.config }}
+        MDSYNC_DRY_RUN: ${{ inputs.dry-run }}
+        MDSYNC_OUT: ${{ inputs.out }}
+        MDSYNC_ONLY: ${{ inputs.only }}
+      run: |
+        set -euo pipefail
+        args=(sync --config "$MDSYNC_CONFIG" --out "$MDSYNC_OUT")
+        case "$MDSYNC_DRY_RUN" in
+          true|True|TRUE) args+=(--dry-run) ;;
+        esac
+        if [[ -n "$MDSYNC_ONLY" ]]; then
+          while IFS= read -r name; do
+            name="${name#"${name%%[![:space:]]*}"}"
+            name="${name%"${name##*[![:space:]]}"}"
+            [[ -z "$name" ]] && continue
+            args+=(--only "$name")
+          done < <(printf '%s\n' "$MDSYNC_ONLY" | tr ',' '\n')
+        fi
+        mdsync "${args[@]}"
+
+branding:
+  icon: upload-cloud
+  color: blue

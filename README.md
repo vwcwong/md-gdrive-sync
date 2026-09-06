@@ -61,6 +61,33 @@ not upload that folder: it would publish private-repo contents as a public
 artifact. When the local render looks right, trigger the workflow for real
 and let the daily schedule take over.
 
+## GitHub Action
+
+Other repositories can run the same publish path with a step. Pin a release
+tag so the runner downloads the Linux binary instead of compiling:
+
+```yaml
+- uses: actions/checkout@v5
+- uses: vwcwong/md-gdrive-sync@v0.1.0
+  with:
+    config: repos.yml
+  env:
+    GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+    GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+    GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+    GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+    NOTES_REPO_TOKEN: ${{ secrets.NOTES_REPO_TOKEN }}
+```
+
+`auth` is not part of the action: mint the refresh token locally, then store
+it as a secret on the calling repository. Inputs are `config`, `dry-run`,
+`out`, `only`, and `version`. Secrets stay in `env` so they are not logged
+as inputs.
+
+This repository's `sync` workflow uses `uses: ./` with `version: source` so
+a scheduled run always matches the commit it is building. Push a `v*` tag to
+cut a GitHub Release and attach the Linux x64 binary other repos download.
+
 ## Commands
 
 ```sh

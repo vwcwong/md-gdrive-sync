@@ -1,0 +1,35 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: mdsync-release
+
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+
+      # Asset name is the contract with scripts/install-mdsync.sh.
+      - name: Stage the release binary
+        run: cp target/release/mdsync mdsync-x86_64-unknown-linux-gnu
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: mdsync-x86_64-unknown-linux-gnu
+          fail_on_unmatched_files: true
+          generate_release_notes: true

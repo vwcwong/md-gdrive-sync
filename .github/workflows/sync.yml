@@ -51,13 +51,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - uses: Swatinem/rust-cache@v2
-
-      - run: nix develop --command cargo build --release
-
-      - name: Sync notes to Drive
+      # Build this commit rather than downloading a release, so a scheduled
+      # run always matches the tree it is running from.
+      - uses: ./
+        with:
+          version: source
+          dry-run: ${{ inputs.dry_run == true }}
         env:
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -65,13 +64,6 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           # Fine-grained PAT with read-only contents access to the notes repos.
           NOTES_REPO_TOKEN: ${{ secrets.NOTES_REPO_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: |
-          args=(sync --config repos.yml --out out)
-          if [ "${DRY_RUN:-false}" = "true" ]; then
-            args+=(--dry-run)
-          fi
-          ./target/release/mdsync "${args[@]}"
 
       # out/ is discarded with the runner. Uploading it would publish the
       # contents of private notes repos to anyone who can see the workflow.
